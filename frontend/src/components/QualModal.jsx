@@ -2,8 +2,7 @@
 // Props: isOpen, onClose, onSave, initialData (null = create mode)
 
 import { useState, useEffect } from "react";
-import { TRAINEES, QUAL_TYPES } from "../data/mockData";
-import { getStatus, addDaysToDate, today } from "../utils/helpers";
+import { addDaysToDate, today } from "../utils/helpers";
 
 const EMPTY = {
   traineeId: "",
@@ -13,34 +12,70 @@ const EMPTY = {
   verified: false,
 };
 
-export default function QualModal({ isOpen, onClose, onSave, initialData }) {
+export default function QualModal({
+  isOpen,
+  onClose,
+  onSave,
+  initialData,
+  traineeOptions = [],
+  qualificationTypeOptions = [],
+  isSaving = false,
+  error = "",
+}) {
   const [form, setForm] = useState(EMPTY);
 
-  // Load data when editing
   useEffect(() => {
-    setForm(initialData ? { ...initialData } : EMPTY);
+    setForm(
+      initialData
+        ? {
+            traineeId: initialData.traineeId || "",
+            qualificationTypeId: initialData.qualificationTypeId || "",
+            issuedDate: initialData.issuedDate || today(),
+            expiryDate: initialData.expiryDate || "",
+            verified: Boolean(initialData.verified),
+          }
+        : EMPTY
+    );
   }, [initialData, isOpen]);
 
-  // Auto-fill expiry when type or issued date changes
+  const selectedType = qualificationTypeOptions.find(
+    (type) => type.id === form.qualificationTypeId
+  );
+
   function handleTypeChange(typeId) {
-    const qt = QUAL_TYPES.find(q => q.id === typeId);
-    const expiry = qt && form.issuedDate ? addDaysToDate(form.issuedDate, qt.validityDays) : "";
-    setForm(f => ({ ...f, qualificationTypeId: typeId, expiryDate: expiry }));
+    const nextType = qualificationTypeOptions.find((type) => type.id === typeId);
+    const expiry =
+      nextType && form.issuedDate
+        ? addDaysToDate(form.issuedDate, nextType.validityDays)
+        : "";
+
+    setForm((current) => ({
+      ...current,
+      qualificationTypeId: typeId,
+      expiryDate: expiry,
+    }));
   }
 
   function handleIssuedChange(date) {
-    const qt = QUAL_TYPES.find(q => q.id === form.qualificationTypeId);
-    const expiry = qt ? addDaysToDate(date, qt.validityDays) : form.expiryDate;
-    setForm(f => ({ ...f, issuedDate: date, expiryDate: expiry }));
+    const expiry = selectedType
+      ? addDaysToDate(date, selectedType.validityDays)
+      : form.expiryDate;
+
+    setForm((current) => ({ ...current, issuedDate: date, expiryDate: expiry }));
   }
 
   function handleSubmit() {
-    if (!form.traineeId || !form.qualificationTypeId || !form.issuedDate || !form.expiryDate) {
+    if (!form.traineeId || !form.qualificationTypeId || !form.issuedDate) {
       alert("Please fill in all required fields.");
       return;
     }
-    onSave({ ...form, status: getStatus(form.expiryDate) });
-    onClose();
+
+    onSave({
+      traineeId: form.traineeId,
+      qualificationTypeId: form.qualificationTypeId,
+      issuedDate: form.issuedDate,
+      verified: form.verified,
+    });
   }
 
   if (!isOpen) return null;
@@ -48,7 +83,7 @@ export default function QualModal({ isOpen, onClose, onSave, initialData }) {
   return (
     // Backdrop
     <div
-      onClick={onClose}
+      onClick={isSaving ? undefined : onClose}
       style={{
         position: "fixed", inset: 0,
         background: "rgba(0,0,0,0.4)",
@@ -72,51 +107,73 @@ export default function QualModal({ isOpen, onClose, onSave, initialData }) {
           {initialData ? "Edit Qualification" : "New Qualification"}
         </h2>
 
-        {/* Trainee */}
+        {error ? (
+          <div style={{ marginBottom: "14px", padding: "10px 12px", borderRadius: "8px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#b91c1c", fontSize: "13px" }}>
+            {error}
+          </div>
+        ) : null}
+
         <Label text="Trainee *">
-          <select value={form.traineeId} onChange={e => setForm(f => ({ ...f, traineeId: e.target.value }))} style={inputStyle}>
+          <select
+            value={form.traineeId}
+            onChange={(e) => setForm((current) => ({ ...current, traineeId: e.target.value }))}
+            style={inputStyle}
+            disabled={isSaving}
+          >
             <option value="">Select trainee...</option>
-            {TRAINEES.map(t => (
-              <option key={t.id} value={t.id}>{t.name} ({t.traineeId})</option>
+            {traineeOptions.map((trainee) => (
+              <option key={trainee.id} value={trainee.id}>
+                {trainee.name} ({trainee.traineeId})
+              </option>
             ))}
           </select>
         </Label>
 
-        {/* Qualification Type */}
         <Label text="Qualification Type *">
-          <select value={form.qualificationTypeId} onChange={e => handleTypeChange(e.target.value)} style={inputStyle}>
+          <select
+            value={form.qualificationTypeId}
+            onChange={(e) => handleTypeChange(e.target.value)}
+            style={inputStyle}
+            disabled={isSaving}
+          >
             <option value="">Select type...</option>
-            {QUAL_TYPES.map(qt => (
-              <option key={qt.id} value={qt.id}>{qt.name} ({qt.validityDays} days)</option>
+            {qualificationTypeOptions.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.name} ({type.validityDays} days)
+              </option>
             ))}
           </select>
         </Label>
 
-        {/* Dates */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
           <Label text="Issued Date *">
-            <input type="date" value={form.issuedDate} onChange={e => handleIssuedChange(e.target.value)} style={inputStyle} />
+            <input
+              type="date"
+              value={form.issuedDate}
+              onChange={(e) => handleIssuedChange(e.target.value)}
+              style={inputStyle}
+              disabled={isSaving}
+            />
           </Label>
-          <Label text="Expiry Date *">
-            <input type="date" value={form.expiryDate} onChange={e => setForm(f => ({ ...f, expiryDate: e.target.value }))} style={inputStyle} />
+          <Label text="Expiry Date">
+            <input type="date" value={form.expiryDate} readOnly style={{ ...inputStyle, background: "#f9fafb", color: "#6b7280" }} />
           </Label>
         </div>
 
-        {/* Verified checkbox */}
         <label style={{ display: "flex", alignItems: "center", gap: "8px", margin: "12px 0 20px", fontSize: "14px", cursor: "pointer" }}>
           <input
             type="checkbox"
             checked={form.verified}
-            onChange={e => setForm(f => ({ ...f, verified: e.target.checked }))}
+            onChange={(e) => setForm((current) => ({ ...current, verified: e.target.checked }))}
+            disabled={isSaving}
           />
           Mark as verified
         </label>
 
-        {/* Buttons */}
         <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={ghostBtn}>Cancel</button>
-          <button onClick={handleSubmit} style={primaryBtn}>
-            {initialData ? "Save Changes" : "Create"}
+          <button onClick={onClose} style={ghostBtn} disabled={isSaving}>Cancel</button>
+          <button onClick={handleSubmit} style={primaryBtn} disabled={isSaving}>
+            {isSaving ? "Saving..." : initialData ? "Save Changes" : "Create"}
           </button>
         </div>
       </div>

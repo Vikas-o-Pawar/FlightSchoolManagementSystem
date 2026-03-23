@@ -1,5 +1,5 @@
 const { randomUUID } = require("crypto");
-const prisma = require("../../src/prisma/client");
+const prisma = require("../prisma/client");
 
 const QUALIFICATION_STATUSES = {
   VALID: "VALID",
@@ -19,12 +19,14 @@ class ServiceError extends Error {
 const qualificationInclude = {
   trainees: true,
   qualification_types: true,
+  qualification_renewals: {
+    orderBy: {
+      renewedOn: "desc",
+    },
+  },
 };
 
-const qualificationDetailInclude = {
-  ...qualificationInclude,
-  qualification_renewals: true,
-};
+const qualificationDetailInclude = qualificationInclude;
 
 const isValidDate = (value) => !Number.isNaN(new Date(value).getTime());
 
@@ -56,6 +58,12 @@ const calculateExpiryDate = (issuedDate, validityDays) => {
   const expiryDate = new Date(issuedDate);
   expiryDate.setUTCDate(expiryDate.getUTCDate() + validityDays);
   return expiryDate;
+};
+
+const normalizeDateOnly = (value) => {
+  const parsedDate = new Date(value);
+  parsedDate.setUTCHours(0, 0, 0, 0);
+  return parsedDate;
 };
 
 const deriveQualificationStatus = (expiryDate, currentStatus) => {
@@ -143,6 +151,8 @@ const createTraineeQualification = async ({
   traineeId,
   qualificationTypeId,
   issuedDate,
+  verified,
+  certificateUrl,
 }) => {
   if (!traineeId || !qualificationTypeId) {
     throw new ServiceError(
@@ -163,6 +173,7 @@ const createTraineeQualification = async ({
     qualificationType.validityDays
   );
   const status = deriveQualificationStatus(expiryDate);
+  const normalizedVerified = normalizeBoolean(verified);
 
   try {
     return await prisma.trainee_qualifications.create({
@@ -173,6 +184,8 @@ const createTraineeQualification = async ({
         issuedDate: parsedIssuedDate,
         expiryDate,
         status,
+        verified: normalizedVerified ?? false,
+        certificateUrl: certificateUrl ?? null,
       },
       include: qualificationDetailInclude,
     });
@@ -227,15 +240,43 @@ const getTraineeQualificationById = async (id) => {
 
 const updateTraineeQualification = async (
   id,
-  { status, certificateUrl, verified }
+  {
+    traineeId,
+    qualificationTypeId,
+    issuedDate,
+    status,
+    certificateUrl,
+    verified,
+  }
 ) => {
   if (!id) {
     throw new ServiceError("Qualification id is required.", 400);
   }
 
-  await ensureQualificationExists(id);
+  const currentQualification = await ensureQualificationExists(id);
 
   const updateData = {};
+  let shouldRecalculateExpiry = false;
+  let nextQualificationTypeId = currentQualification.qualificationTypeId;
+  let nextIssuedDate = currentQualification.issuedDate;
+
+  if (traineeId !== undefined) {
+    await ensureTraineeExists(traineeId);
+    updateData.traineeId = traineeId;
+  }
+
+  if (qualificationTypeId !== undefined) {
+    await ensureQualificationTypeExists(qualificationTypeId);
+    updateData.qualificationTypeId = qualificationTypeId;
+    nextQualificationTypeId = qualificationTypeId;
+    shouldRecalculateExpiry = true;
+  }
+
+  if (issuedDate !== undefined) {
+    nextIssuedDate = parseIssuedDate(issuedDate);
+    updateData.issuedDate = nextIssuedDate;
+    shouldRecalculateExpiry = true;
+  }
 
   if (status !== undefined) {
     if (!Object.values(QUALIFICATION_STATUSES).includes(status)) {
@@ -263,17 +304,102 @@ const updateTraineeQualification = async (
     updateData.verified = normalizedVerified;
   }
 
+  if (shouldRecalculateExpiry) {
+    const qualificationType = await ensureQualificationTypeExists(
+      nextQualificationTypeId
+    );
+
+    updateData.expiryDate = calculateExpiryDate(
+      nextIssuedDate,
+      qualificationType.validityDays
+    );
+
+    if (status === undefined || status !== QUALIFICATION_STATUSES.REVOKED) {
+      updateData.status = deriveQualificationStatus(updateData.expiryDate, status);
+    }
+  }
+
   if (Object.keys(updateData).length === 0) {
     throw new ServiceError(
-      "At least one of status, certificateUrl, or verified must be provided.",
+      "At least one field must be provided for update.",
       400
     );
   }
 
-  return prisma.trainee_qualifications.update({
-    where: { id },
-    data: updateData,
-    include: qualificationDetailInclude,
+  try {
+    return await prisma.trainee_qualifications.update({
+      where: { id },
+      data: updateData,
+      include: qualificationDetailInclude,
+    });
+  } catch (error) {
+    if (error.code === "P2002") {
+      throw new ServiceError(
+        "This trainee already has a qualification for the selected qualification type.",
+        400
+      );
+    }
+
+    throw error;
+  }
+};
+
+const createQualificationRenewal = async ({
+  traineeQualificationId,
+  renewedOn,
+  newExpiryDate,
+  notes,
+}) => {
+  if (!traineeQualificationId || !renewedOn || !newExpiryDate) {
+    throw new ServiceError(
+      "traineeQualificationId, renewedOn, and newExpiryDate are required.",
+      400
+    );
+  }
+
+  const qualification = await ensureQualificationExists(traineeQualificationId);
+
+  if (!isValidDate(renewedOn) || !isValidDate(newExpiryDate)) {
+    throw new ServiceError("renewedOn and newExpiryDate must be valid dates.", 400);
+  }
+
+  const normalizedRenewedOn = normalizeDateOnly(renewedOn);
+  const normalizedNewExpiryDate = normalizeDateOnly(newExpiryDate);
+
+  if (normalizedNewExpiryDate <= normalizeDateOnly(qualification.expiryDate)) {
+    throw new ServiceError(
+      "newExpiryDate must be later than the current expiry date.",
+      400
+    );
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const renewal = await tx.qualification_renewals.create({
+      data: {
+        id: randomUUID(),
+        traineeQualificationId,
+        renewedOn: normalizedRenewedOn,
+        newExpiryDate: normalizedNewExpiryDate,
+        notes: notes ?? null,
+      },
+    });
+
+    const updatedQualification = await tx.trainee_qualifications.update({
+      where: { id: traineeQualificationId },
+      data: {
+        expiryDate: normalizedNewExpiryDate,
+        status: deriveQualificationStatus(
+          normalizedNewExpiryDate,
+          qualification.status
+        ),
+      },
+      include: qualificationDetailInclude,
+    });
+
+    return {
+      ...renewal,
+      trainee_qualifications: updatedQualification,
+    };
   });
 };
 
@@ -293,6 +419,7 @@ module.exports = {
   QUALIFICATION_STATUSES,
   ServiceError,
   createTraineeQualification,
+  createQualificationRenewal,
   getAllTraineeQualifications,
   getTraineeQualificationById,
   updateTraineeQualification,

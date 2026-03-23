@@ -26,7 +26,7 @@ export default function App() {
             background: page === "qms" ? "rgba(255,255,255,0.15)" : "transparent",
             color: "#fff",
           }}>
-            📋 Qualifications (I-16)
+            📋 Qualifications
           </button>
           <button onClick={() => setPage("automation")} style={{
             padding: "6px 16px", borderRadius: "6px", border: "none", cursor: "pointer",
@@ -34,7 +34,7 @@ export default function App() {
             background: page === "automation" ? "rgba(255,255,255,0.15)" : "transparent",
             color: "#fff",
           }}>
-            ⚡ Automation (I-17)
+            ⚡ Automation
           </button>
         </div>
       </div>

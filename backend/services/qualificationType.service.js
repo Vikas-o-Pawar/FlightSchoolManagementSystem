@@ -1,5 +1,5 @@
 const { randomUUID } = require("crypto");
-const prisma = require("../../src/prisma/client");
+const prisma = require("../prisma/client");
 const { ServiceError } = require("./traineeQualification.service");
 
 const validateQualificationTypePayload = ({
