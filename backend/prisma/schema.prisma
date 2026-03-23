@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model competencies {
+  id            String @id
+  traineeId     String
+  navigation    Int    @default(0)
+  communication Int    @default(0)
+  procedures    Int    @default(0)
+  airmanship    Int    @default(0)
+  emergencies   Int    @default(0)
+  trainees      trainees @relation(fields: [traineeId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "competencies_traineeId_fkey")
+
+  @@index([traineeId], map: "competencies_traineeId_fkey")
+}
+
+model flight_hours {
+  id             String   @id
+  traineeId      String   @unique
+  totalHours     Float    @default(0)
+  simulatorHours Float    @default(0)
+  aircraftHours  Float    @default(0)
+  targetHours    Float    @default(200)
+  trainees       trainees @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+}
+
+model qualification_alerts {
+  id                     String                          @id
+  traineeQualificationId String
+  alertType              qualification_alerts_alertType?
+  isSent                 Boolean                         @default(false)
+  sentAt                 DateTime?
+  createdAt              DateTime                        @default(dbgenerated("(now(3))"))
+  trainee_qualifications trainee_qualifications          @relation(fields: [traineeQualificationId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "alerts_tq_fkey")
+
+  @@index([traineeQualificationId], map: "alerts_tq_fkey")
+}
+
+model qualification_renewals {
+  id                     String   @id
+  traineeQualificationId String
+  renewedOn              DateTime
+  newExpiryDate          DateTime
+  notes                  String?  @db.Text
+  createdAt              DateTime @default(dbgenerated("(now(3))"))
+  trainee_qualifications trainee_qualifications @relation(fields: [traineeQualificationId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "renewals_tq_fkey")
+
+  @@index([traineeQualificationId], map: "renewals_tq_fkey")
+}
+
+model qualification_types {
+  id           String   @id
+  name         String
+  description  String?  @db.Text
+  validityDays Int
+  createdAt    DateTime @default(dbgenerated("(now(3))"))
+  resource_qualifications resource_qualifications[]
+  trainee_qualifications  trainee_qualifications[]
+}
+
+model resource_qualifications {
+  id                  String @id
+  resourceId          String
+  qualificationTypeId String
+  qualification_types qualification_types @relation(fields: [qualificationTypeId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "rq_type_fkey")
+  resources           resources           @relation(fields: [resourceId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "rq_resource_fkey")
+
+  @@unique([resourceId, qualificationTypeId], map: "resource_qualifications_unique")
+  @@index([qualificationTypeId], map: "rq_type_fkey")
+  @@index([resourceId], map: "rq_resource_fkey")
+}
+
+model resources {
+  id        String         @id
+  name      String
+  type      resources_type
+  status    String?        @db.VarChar(50)
+  createdAt DateTime       @default(dbgenerated("(now(3))"))
+  resource_qualifications resource_qualifications[]
+}
+
+model sessions {
+  id         String   @id
+  traineeId  String
+  date       DateTime
+  instructor String
+  aircraft   String?
+  grade      Int
+  notes      String?  @db.Text
+  createdAt  DateTime @default(dbgenerated("(now(3))"))
+  trainees   trainees @relation(fields: [traineeId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "sessions_traineeId_fkey")
+
+  @@index([traineeId], map: "sessions_traineeId_fkey")
+}
+
+model trainee_qualifications {
+  id                   String                        @id
+  traineeId            String
+  qualificationTypeId  String
+  issuedDate           DateTime
+  expiryDate           DateTime
+  status               trainee_qualifications_status
+  certificateUrl       String?                       @db.Text
+  verified             Boolean                       @default(false)
+  createdAt            DateTime                      @default(dbgenerated("(now(3))"))
+  qualification_alerts qualification_alerts[]
+  qualification_renewals qualification_renewals[]
+  qualification_types   qualification_types          @relation(fields: [qualificationTypeId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "tq_type_fkey")
+  trainees              trainees                     @relation(fields: [traineeId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "tq_trainee_fkey")
+
+  @@unique([traineeId, qualificationTypeId], map: "uq_trainee_qualification")
+  @@index([qualificationTypeId], map: "tq_type_fkey")
+  @@index([traineeId], map: "tq_trainee_fkey")
+}
+
+model trainees {
+  id             String          @id
+  traineeId      String          @unique(map: "trainees_traineeId_key")
+  name           String
+  email          String          @unique(map: "trainees_email_key")
+  phone          String?
+  dob            DateTime?
+  enrollmentDate DateTime        @default(dbgenerated("(now(3))"))
+  course         String
+  licenseType    String?
+  status         trainees_status @default(ACTIVE)
+  createdAt      DateTime        @default(dbgenerated("(now(3))"))
+  updatedAt      DateTime        @updatedAt
+  competencies   competencies[]
+  flight_hours   flight_hours?
+  sessions       sessions[]
+  trainee_qualifications trainee_qualifications[]
+}
+
+enum resources_type {
+  AIRCRAFT
+  SIMULATOR
+}
+
+enum qualification_alerts_alertType {
+  DAYS_30 @map("30_DAYS")
+  DAYS_60 @map("60_DAYS")
+  DAYS_90 @map("90_DAYS")
+}
+
+enum trainee_qualifications_status {
+  VALID
+  EXPIRING
+  EXPIRED
+  REVOKED
+}
+
+enum trainees_status {
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  DROPPED
+}
+
