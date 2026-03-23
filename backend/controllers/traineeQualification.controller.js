@@ -19,6 +19,18 @@ const createTraineeQualification = async (req, res) => {
   }
 };
 
+const createQualificationRenewal = async (req, res) => {
+  try {
+    const renewal = await traineeQualificationService.createQualificationRenewal(
+      req.body
+    );
+
+    return res.status(201).json(renewal);
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
 const getAllTraineeQualifications = async (req, res) => {
   try {
     const qualifications =
@@ -68,6 +80,7 @@ const deleteTraineeQualification = async (req, res) => {
 
 module.exports = {
   createTraineeQualification,
+  createQualificationRenewal,
   getAllTraineeQualifications,
   getTraineeQualificationById,
   updateTraineeQualification,

@@ -1,9 +1,9 @@
 // Which milestone types can trigger which qualification type renewals
 export const MILESTONE_RULES = {
-  COURSE_COMPLETE:    ["qt1", "qt2", "qt4", "qt5"], // ATPL, IR, Type Rating, CRM
-  ASSESSMENT_PASSED:  ["qt3"],                       // Medical Class 1
-  SIMULATOR_SESSION:  ["qt2", "qt4"],                // IR Rating, Type Rating
-  ANNUAL_CHECK:       ["qt1", "qt3", "qt5"],         // ATPL, Medical, CRM
+  COURSE_COMPLETE: ["atpl theory", "ir rating", "type rating a320", "crm certificate"],
+  ASSESSMENT_PASSED: ["medical class 1"],
+  SIMULATOR_SESSION: ["ir rating", "type rating a320"],
+  ANNUAL_CHECK: ["atpl theory", "medical class 1", "crm certificate"],
 };
 
 // Human-readable milestone labels
@@ -86,10 +86,14 @@ export function checkEligibility(qual, renewalHistory = []) {
  * Returns array of { qual, reason } objects.
  */
 export function processMilestone(traineeId, milestoneType, allQuals, renewalHistory = []) {
-  const eligibleTypeIds = MILESTONE_RULES[milestoneType] || [];
+  const eligibleTypeNames = MILESTONE_RULES[milestoneType] || [];
 
   const traineeQuals = allQuals.filter(
-    q => q.traineeId === traineeId && eligibleTypeIds.includes(q.qualificationTypeId)
+    q =>
+      q.traineeId === traineeId &&
+      eligibleTypeNames.includes(
+        String(q.qualTypeName || q.qualification_types?.name || "").trim().toLowerCase()
+      )
   );
 
   const results = [];

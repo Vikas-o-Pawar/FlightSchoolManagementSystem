@@ -1,119 +1,137 @@
-// AutomationPage.jsx  —  I-17 Main Page
-// Auto-renewal logic engine, expiry tracking, milestone triggers, renewal history
-//
-// DROP THIS FILE into: src/pages/AutomationPage.jsx
-// Then import it in App.jsx
-
-import { useState, useMemo } from "react";
-
-// Data
-import { INITIAL_QUALS, TRAINEES, QUAL_TYPES } from "../data/mockData";
-
-// Utils
-import { getStatus, getDaysLeft } from "../utils/helpers";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
-  checkEligibility,
+  createRenewal,
+  getAllQualifications,
+} from "../api/qualificationApi";
+import { getDaysLeft } from "../utils/helpers";
+import {
   calculateRenewedExpiry,
-  buildRenewalRecord,
 } from "../utils/renewalEngine";
-
-// Components
-import RenewalHistory     from "../components/RenewalHistory";
+import RenewalHistory from "../components/RenewalHistory";
 import ManualRenewalModal from "../components/ManualRenewalModal";
-import MilestonePanel from "../components/MileStonePanel";
-import EligibilityBadge from "../components/Eligibilitybadge";
+import MilestonePanel from "../components/MilestonePanel";
+import EligibilityBadge from "../components/EligibilityBadge";
 
+function enrichQualification(qualification) {
+  return {
+    ...qualification,
+    daysLeft: getDaysLeft(qualification.expiryDate),
+    traineeName: qualification.trainees?.name || "-",
+    traineeCode: qualification.trainees?.traineeId || "-",
+    qualTypeName: qualification.qualification_types?.name || "-",
+    validityDays: qualification.qualification_types?.validityDays || 0,
+  };
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
+function flattenRenewalHistory(qualifications) {
+  return qualifications
+    .flatMap((qualification) =>
+      (qualification.qualification_renewals || []).map((renewal) => ({
+        ...renewal,
+        trigger: renewal.notes?.startsWith("Auto:") ? renewal.notes.replace("Auto:", "").trim() : "Manual",
+        qualName: qualification.qualification_types?.name || "-",
+        traineeQualificationId: qualification.id,
+      }))
+    )
+    .sort(
+      (left, right) =>
+        new Date(right.renewedOn).getTime() - new Date(left.renewedOn).getTime()
+    );
+}
 
 export default function AutomationPage() {
-  // Shared qual state (in real app this comes from global store / I-16's state)
-  const [quals,          setQuals]          = useState(INITIAL_QUALS);
+  const [quals, setQuals] = useState([]);
   const [renewalHistory, setRenewalHistory] = useState([]);
-
-  // Modal state
-  const [renewTarget, setRenewTarget] = useState(null); // qual selected for manual renewal
-
-  // Which qual's history is expanded
+  const [renewTarget, setRenewTarget] = useState(null);
   const [expandedQualId, setExpandedQualId] = useState(null);
-
-  // Tab: "table" | "milestone"
   const [tab, setTab] = useState("table");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [renewalError, setRenewalError] = useState("");
+  const [isSubmittingRenewal, setIsSubmittingRenewal] = useState(false);
+  const [isApplyingMilestone, setIsApplyingMilestone] = useState(false);
 
-  // ── Enrich quals with display fields ──────────────────────────────────────
-  const enriched = useMemo(() =>
-    quals.map(q => ({
-      ...q,
-      status:       getStatus(q.expiryDate),
-      daysLeft:     getDaysLeft(q.expiryDate),
-      traineeName:  TRAINEES.find(t => t.id === q.traineeId)?.name || "—",
-      qualTypeName: QUAL_TYPES.find(qt => qt.id === q.qualificationTypeId)?.name || "—",
-    })),
-  [quals]);
+  useEffect(() => {
+    loadQualifications();
+  }, []);
 
-  // Sort: expired first, then expiring, then valid
-  const sorted = useMemo(() => [...enriched].sort((a, b) => a.daysLeft - b.daysLeft), [enriched]);
+  async function loadQualifications() {
+    setLoading(true);
+    setError("");
 
-  // Stats
-  const stats = useMemo(() => ({
-    total:    enriched.length,
-    expiring: enriched.filter(q => q.status === "EXPIRING").length,
-    expired:  enriched.filter(q => q.status === "EXPIRED").length,
-    renewed:  renewalHistory.length,
-  }), [enriched, renewalHistory]);
-
-  // ── Handlers ──────────────────────────────────────────────────────────────
-
-  // Called when ManualRenewalModal confirms
-  function handleManualRenewal(record, qualId, newExpiry) {
-    // Update qual expiry + status in state
-    setQuals(qs => qs.map(q =>
-      q.id === qualId
-        ? { ...q, expiryDate: newExpiry, status: getStatus(newExpiry) }
-        : q
-    ));
-    // Add to history
-    setRenewalHistory(h => [{ ...record, trigger: "Manual" }, ...h]);
-    setRenewTarget(null);
-  }
-
-  // Called when MilestonePanel applies results
-  function handleMilestoneApply(traineeId, milestoneType, results) {
-    const updates = {};
-    const newRecords = [];
-
-    for (const result of results) {
-      const qt = QUAL_TYPES.find(q => q.id === result.qual.qualificationTypeId);
-      const newExpiry = calculateRenewedExpiry(result.qual.expiryDate, qt?.validityDays || 365);
-      updates[result.qual.id] = newExpiry;
-
-      const record = buildRenewalRecord(result.qual.id, newExpiry, `Auto: ${milestoneType}`);
-      newRecords.push({ ...record, trigger: milestoneType });
+    try {
+      const qualifications = await getAllQualifications();
+      setQuals(qualifications);
+      setRenewalHistory(flattenRenewalHistory(qualifications));
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
     }
-
-    setQuals(qs => qs.map(q =>
-      updates[q.id] ? { ...q, expiryDate: updates[q.id] } : q
-    ));
-    setRenewalHistory(h => [...newRecords, ...h]);
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  const enriched = useMemo(() => quals.map(enrichQualification), [quals]);
+
+  const sorted = useMemo(
+    () => [...enriched].sort((left, right) => left.daysLeft - right.daysLeft),
+    [enriched]
+  );
+
+  const stats = useMemo(
+    () => ({
+      total: enriched.length,
+      expiring: enriched.filter((qualification) => qualification.status === "EXPIRING").length,
+      expired: enriched.filter((qualification) => qualification.status === "EXPIRED").length,
+      renewed: renewalHistory.length,
+    }),
+    [enriched, renewalHistory]
+  );
+
+  async function handleManualRenewal(payload) {
+    setIsSubmittingRenewal(true);
+    setRenewalError("");
+
+    try {
+      await createRenewal(payload);
+      await loadQualifications();
+      setRenewTarget(null);
+    } catch (requestError) {
+      setRenewalError(requestError.message);
+    } finally {
+      setIsSubmittingRenewal(false);
+    }
+  }
+
+  async function handleMilestoneApply(_traineeId, milestoneType, results) {
+    setIsApplyingMilestone(true);
+    setError("");
+
+    try {
+      for (const result of results) {
+        const newExpiryDate = calculateRenewedExpiry(
+          result.qual.expiryDate,
+          result.qual.validityDays || 365
+        );
+
+        await createRenewal({
+          traineeQualificationId: result.qual.id,
+          renewedOn: new Date().toISOString().split("T")[0],
+          newExpiryDate,
+          notes: `Auto: ${milestoneType}`,
+        });
+      }
+
+      await loadQualifications();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setIsApplyingMilestone(false);
+    }
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#f3f4f6", fontFamily: "system-ui, sans-serif" }}>
-
-      {/* Navbar */}
-      <div style={{ background: "#1e3a5f", color: "#fff", padding: "0 32px", height: "56px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <span style={{ fontSize: "20px" }}>✈️</span>
-          <span style={{ fontWeight: "700", fontSize: "16px" }}>FSMS</span>
-          <span style={{ color: "#94a3b8", fontSize: "13px" }}>/ QMS / Automation</span>
-        </div>
-        <span style={{ fontSize: "12px", color: "#94a3b8" }}>Team T6 · I-17</span>
-      </div>
-
       <div style={{ padding: "28px 32px", maxWidth: "1200px", margin: "0 auto" }}>
-
-        {/* Page title */}
         <div style={{ marginBottom: "24px" }}>
           <h1 style={{ margin: "0 0 4px", fontSize: "22px", fontWeight: "700", color: "#111827" }}>
             Renewal Automation Engine
@@ -123,152 +141,324 @@ export default function AutomationPage() {
           </p>
         </div>
 
-        {/* Stats row */}
-        <div style={{ display: "flex", gap: "16px", marginBottom: "24px" }}>
-          {[
-            { label: "Total Qualifications", value: stats.total,    color: "#2563eb" },
-            { label: "Expiring (≤90 days)",  value: stats.expiring, color: "#d97706" },
-            { label: "Expired",              value: stats.expired,  color: "#dc2626" },
-            { label: "Renewals Applied",     value: stats.renewed,  color: "#16a34a" },
-          ].map(c => (
-            <div key={c.label} style={{ flex: 1, background: "#fff", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "16px 20px", borderTop: `4px solid ${c.color}` }}>
-              <div style={{ fontSize: "28px", fontWeight: "700", color: c.color }}>{c.value}</div>
-              <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>{c.label}</div>
+        {error ? <ErrorBanner message={error} /> : null}
+        {loading ? (
+          <LoadingState label="Loading renewal data..." />
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: "16px", marginBottom: "24px" }}>
+              {[
+                { label: "Total Qualifications", value: stats.total, color: "#2563eb" },
+                { label: "Expiring (<= 60 days)", value: stats.expiring, color: "#d97706" },
+                { label: "Expired", value: stats.expired, color: "#dc2626" },
+                { label: "Renewals Applied", value: stats.renewed, color: "#16a34a" },
+              ].map((card) => (
+                <div
+                  key={card.label}
+                  style={{
+                    flex: 1,
+                    background: "#fff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "8px",
+                    padding: "16px 20px",
+                    borderTop: `4px solid ${card.color}`,
+                  }}
+                >
+                  <div style={{ fontSize: "28px", fontWeight: "700", color: card.color }}>
+                    {card.value}
+                  </div>
+                  <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>
+                    {card.label}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        {/* Tabs */}
-        <div style={{ display: "flex", gap: "4px", marginBottom: "20px", background: "#e5e7eb", borderRadius: "8px", padding: "4px", width: "fit-content" }}>
-          {[["table", "📋 Qualification Status"], ["milestone", "⚡ Milestone Trigger"]].map(([key, label]) => (
-            <button key={key} onClick={() => setTab(key)} style={{
-              padding: "7px 18px", borderRadius: "6px", border: "none", cursor: "pointer",
-              fontWeight: "600", fontSize: "13px",
-              background: tab === key ? "#fff" : "transparent",
-              color:      tab === key ? "#111827" : "#6b7280",
-              boxShadow:  tab === key ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-            }}>
-              {label}
-            </button>
-          ))}
-        </div>
+            <div
+              style={{
+                display: "flex",
+                gap: "4px",
+                marginBottom: "20px",
+                background: "#e5e7eb",
+                borderRadius: "8px",
+                padding: "4px",
+                width: "fit-content",
+              }}
+            >
+              {[
+                ["table", "Qualification Status"],
+                ["milestone", "Milestone Trigger"],
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setTab(key)}
+                  style={{
+                    padding: "7px 18px",
+                    borderRadius: "6px",
+                    border: "none",
+                    cursor: "pointer",
+                    fontWeight: "600",
+                    fontSize: "13px",
+                    background: tab === key ? "#fff" : "transparent",
+                    color: tab === key ? "#111827" : "#6b7280",
+                    boxShadow: tab === key ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
 
-        {/* ── Tab: Qualification Status Table ── */}
-        {tab === "table" && (
-          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "8px", overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ background: "#f9fafb" }}>
-                  {["Trainee", "Qualification", "Expires", "Days Left", "Status", "Eligible?", "Actions"].map(h => (
-                    <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: "11px", fontWeight: "600", color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map(q => {
-                  const historyForQ = renewalHistory.filter(r => r.traineeQualificationId === q.id);
-                  return (
-                    <>
-                      <tr key={q.id}
-                        style={{ borderBottom: "1px solid #f3f4f6", cursor: "pointer" }}
-                        onMouseEnter={e => e.currentTarget.style.background = "#f9fafb"}
-                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                      >
-                        <td style={{ padding: "12px 16px", fontSize: "14px", fontWeight: "600" }}>{q.traineeName}</td>
-                        <td style={{ padding: "12px 16px", fontSize: "14px" }}>{q.qualTypeName}</td>
-                        <td style={{ padding: "12px 16px", fontSize: "13px", color: q.daysLeft < 0 ? "#dc2626" : q.daysLeft < 90 ? "#d97706" : "#374151", fontWeight: "600" }}>
-                          {q.expiryDate}
-                        </td>
-                        <td style={{ padding: "12px 16px", fontSize: "13px", fontWeight: "700", color: q.daysLeft < 0 ? "#dc2626" : q.daysLeft < 30 ? "#d97706" : "#16a34a" }}>
-                          {q.daysLeft < 0 ? `${q.daysLeft}d` : `+${q.daysLeft}d`}
-                        </td>
-                        <td style={{ padding: "12px 16px" }}>
-                          <StatusChip status={q.status} />
-                        </td>
-                        <td style={{ padding: "12px 16px" }}>
-                          <EligibilityBadge qual={q} renewalHistory={renewalHistory} />
-                        </td>
-                        <td style={{ padding: "12px 16px" }}>
-                          <div style={{ display: "flex", gap: "8px" }}>
-                            <button
-                              onClick={() => setRenewTarget(q)}
-                              style={{ padding: "5px 12px", border: "1px solid #2563eb", borderRadius: "5px", background: "transparent", color: "#2563eb", fontSize: "12px", fontWeight: "600", cursor: "pointer" }}
+            {tab === "table" ? (
+              <div
+                style={{
+                  background: "#fff",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "8px",
+                  overflow: "hidden",
+                }}
+              >
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#f9fafb" }}>
+                      {["Trainee", "Qualification", "Expires", "Days Left", "Status", "Eligible?", "Actions"].map((heading) => (
+                        <th
+                          key={heading}
+                          style={{
+                            padding: "10px 16px",
+                            textAlign: "left",
+                            fontSize: "11px",
+                            fontWeight: "600",
+                            color: "#6b7280",
+                            textTransform: "uppercase",
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {heading}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sorted.map((qualification) => {
+                      const historyForQualification = renewalHistory.filter(
+                        (record) => record.traineeQualificationId === qualification.id
+                      );
+
+                      return (
+                        <Fragment key={qualification.id}>
+                          <tr
+                            style={{ borderBottom: "1px solid #f3f4f6", cursor: "pointer" }}
+                            onMouseEnter={(event) => {
+                              event.currentTarget.style.background = "#f9fafb";
+                            }}
+                            onMouseLeave={(event) => {
+                              event.currentTarget.style.background = "transparent";
+                            }}
+                          >
+                            <td style={{ padding: "12px 16px", fontSize: "14px", fontWeight: "600" }}>
+                              {qualification.traineeName}
+                            </td>
+                            <td style={{ padding: "12px 16px", fontSize: "14px" }}>
+                              {qualification.qualTypeName}
+                            </td>
+                            <td
+                              style={{
+                                padding: "12px 16px",
+                                fontSize: "13px",
+                                color:
+                                  qualification.daysLeft < 0
+                                    ? "#dc2626"
+                                    : qualification.daysLeft < 60
+                                      ? "#d97706"
+                                      : "#374151",
+                                fontWeight: "600",
+                              }}
                             >
-                              🔄 Renew
-                            </button>
-                            {historyForQ.length > 0 && (
-                              <button
-                                onClick={() => setExpandedQualId(expandedQualId === q.id ? null : q.id)}
-                                style={{ padding: "5px 12px", border: "1px solid #e5e7eb", borderRadius: "5px", background: "transparent", color: "#6b7280", fontSize: "12px", fontWeight: "600", cursor: "pointer" }}
-                              >
-                                {expandedQualId === q.id ? "Hide" : `History (${historyForQ.length})`}
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
+                              {qualification.expiryDate}
+                            </td>
+                            <td
+                              style={{
+                                padding: "12px 16px",
+                                fontSize: "13px",
+                                fontWeight: "700",
+                                color:
+                                  qualification.daysLeft < 0
+                                    ? "#dc2626"
+                                    : qualification.daysLeft < 30
+                                      ? "#d97706"
+                                      : "#16a34a",
+                              }}
+                            >
+                              {qualification.daysLeft < 0
+                                ? `${qualification.daysLeft}d`
+                                : `+${qualification.daysLeft}d`}
+                            </td>
+                            <td style={{ padding: "12px 16px" }}>
+                              <StatusChip status={qualification.status} />
+                            </td>
+                            <td style={{ padding: "12px 16px" }}>
+                              <EligibilityBadge
+                                qual={qualification}
+                                renewalHistory={renewalHistory}
+                              />
+                            </td>
+                            <td style={{ padding: "12px 16px" }}>
+                              <div style={{ display: "flex", gap: "8px" }}>
+                                <button
+                                  onClick={() => {
+                                    setRenewalError("");
+                                    setRenewTarget(qualification);
+                                  }}
+                                  style={actionBtn("#2563eb")}
+                                >
+                                  Renew
+                                </button>
+                                {historyForQualification.length > 0 ? (
+                                  <button
+                                    onClick={() =>
+                                      setExpandedQualId(
+                                        expandedQualId === qualification.id
+                                          ? null
+                                          : qualification.id
+                                      )
+                                    }
+                                    style={actionBtn("#6b7280", "#e5e7eb")}
+                                  >
+                                    {expandedQualId === qualification.id
+                                      ? "Hide"
+                                      : `History (${historyForQualification.length})`}
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
 
-                      {/* Inline renewal history */}
-                      {expandedQualId === q.id && (
-                        <tr key={`${q.id}-history`}>
-                          <td colSpan={7} style={{ padding: "0 16px 16px", background: "#f9fafb" }}>
-                            <RenewalHistory history={historyForQ} qualName={q.qualTypeName} />
-                          </td>
-                        </tr>
-                      )}
-                    </>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                          {expandedQualId === qualification.id ? (
+                            <tr>
+                              <td colSpan={7} style={{ padding: "0 16px 16px", background: "#f9fafb" }}>
+                                <RenewalHistory
+                                  history={historyForQualification}
+                                  qualName={qualification.qualTypeName}
+                                />
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+                <MilestonePanel
+                  allQuals={enriched}
+                  renewalHistory={renewalHistory}
+                  onApply={handleMilestoneApply}
+                  isApplying={isApplyingMilestone}
+                />
 
-        {/* ── Tab: Milestone Trigger ── */}
-        {tab === "milestone" && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-            <MilestonePanel
-              allQuals={enriched}
-              renewalHistory={renewalHistory}
-              onApply={handleMilestoneApply}
-            />
-
-            {/* Recent renewal history (all) */}
-            <div>
-              <RenewalHistory
-                history={renewalHistory}
-                qualName="All Qualifications"
-              />
-            </div>
-          </div>
+                <div>
+                  <RenewalHistory
+                    history={renewalHistory}
+                    qualName="All Qualifications"
+                  />
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      {/* Manual Renewal Modal */}
       <ManualRenewalModal
         qual={renewTarget}
         qualName={renewTarget?.qualTypeName}
         traineeName={renewTarget?.traineeName}
-        onClose={() => setRenewTarget(null)}
+        onClose={() => {
+          if (isSubmittingRenewal) return;
+          setRenewTarget(null);
+          setRenewalError("");
+        }}
         onConfirm={handleManualRenewal}
+        isSubmitting={isSubmittingRenewal}
+        error={renewalError}
       />
     </div>
   );
 }
 
-// Small inline status chip (reused locally)
 function StatusChip({ status }) {
   const map = {
-    VALID:    { bg: "#dcfce7", color: "#16a34a", border: "#86efac" },
+    VALID: { bg: "#dcfce7", color: "#16a34a", border: "#86efac" },
     EXPIRING: { bg: "#fef9c3", color: "#d97706", border: "#fde047" },
-    EXPIRED:  { bg: "#fee2e2", color: "#dc2626", border: "#fca5a5" },
+    EXPIRED: { bg: "#fee2e2", color: "#dc2626", border: "#fca5a5" },
+    REVOKED: { bg: "#e5e7eb", color: "#4b5563", border: "#d1d5db" },
   };
-  const c = map[status] || map.VALID;
+
+  const colors = map[status] || map.VALID;
+
   return (
-    <span style={{ fontSize: "12px", fontWeight: "600", padding: "2px 10px", borderRadius: "999px", background: c.bg, color: c.color, border: `1px solid ${c.border}` }}>
+    <span
+      style={{
+        fontSize: "12px",
+        fontWeight: "600",
+        padding: "2px 10px",
+        borderRadius: "999px",
+        background: colors.bg,
+        color: colors.color,
+        border: `1px solid ${colors.border}`,
+      }}
+    >
       {status}
     </span>
+  );
+}
+
+function actionBtn(color, border = color) {
+  return {
+    padding: "5px 12px",
+    border: `1px solid ${border}`,
+    borderRadius: "5px",
+    background: "transparent",
+    color,
+    fontSize: "12px",
+    fontWeight: "600",
+    cursor: "pointer",
+  };
+}
+
+function ErrorBanner({ message }) {
+  return (
+    <div
+      style={{
+        marginBottom: "16px",
+        padding: "10px 12px",
+        borderRadius: "8px",
+        border: "1px solid #fca5a5",
+        background: "#fee2e2",
+        color: "#b91c1c",
+        fontSize: "13px",
+      }}
+    >
+      {message}
+    </div>
+  );
+}
+
+function LoadingState({ label }) {
+  return (
+    <div
+      style={{
+        padding: "48px",
+        textAlign: "center",
+        color: "#6b7280",
+        background: "#fff",
+        border: "1px solid #e5e7eb",
+        borderRadius: "8px",
+      }}
+    >
+      {label}
+    </div>
   );
 }

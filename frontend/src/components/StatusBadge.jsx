@@ -4,6 +4,7 @@ const COLORS = {
   VALID:    { text: "#16a34a", bg: "#dcfce7", border: "#86efac" },
   EXPIRING: { text: "#d97706", bg: "#fef9c3", border: "#fde047" },
   EXPIRED:  { text: "#dc2626", bg: "#fee2e2", border: "#fca5a5" },
+  REVOKED:  { text: "#4b5563", bg: "#e5e7eb", border: "#d1d5db" },
 };
 
 export default function StatusBadge({ status }) {

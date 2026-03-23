@@ -1,73 +1,189 @@
-// QMSPage.jsx  —  I-16 page
-// Moved into src/pages/ so App.jsx can switch between I-16 and I-17
-
-import { useState, useMemo } from "react";
-
-import { INITIAL_QUALS, TRAINEES, QUAL_TYPES } from "../data/mockData";
-import { getStatus, getDaysLeft, today }       from "../utils/helpers";
-
-import StatsRow      from "../components/StatsRow";
-import FilterBar     from "../components/FilterBar";
-import QualTable     from "../components/QualTable";
-import QualModal     from "../components/QualModal";
-import DetailModal   from "../components/DetailModal";
+import { useEffect, useMemo, useState } from "react";
+import {
+  createQualification,
+  deleteQualification,
+  getAllQualifications,
+  getQualificationTypes,
+  getTrainees,
+  updateQualification,
+} from "../api/qualificationApi";
+import { getDaysLeft } from "../utils/helpers";
+import StatsRow from "../components/StatsRow";
+import FilterBar from "../components/FilterBar";
+import QualTable from "../components/QualTable";
+import QualModal from "../components/QualModal";
+import DetailModal from "../components/DetailModal";
 import DeleteConfirm from "../components/DeleteConfirm";
 
+function enrichQualification(qualification) {
+  return {
+    ...qualification,
+    daysLeft: getDaysLeft(qualification.expiryDate),
+    traineeName: qualification.trainees?.name || "-",
+    traineeCode: qualification.trainees?.traineeId || "-",
+    qualTypeName: qualification.qualification_types?.name || "-",
+    validityDays: qualification.qualification_types?.validityDays || 0,
+  };
+}
+
 export default function QMSPage() {
-  const [quals, setQuals] = useState(INITIAL_QUALS);
-
-  const [search,       setSearch]       = useState("");
+  const [quals, setQuals] = useState([]);
+  const [trainees, setTrainees] = useState([]);
+  const [qualificationTypes, setQualificationTypes] = useState([]);
+  const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
-
-  const [showForm,   setShowForm]   = useState(false);
-  const [editData,   setEditData]   = useState(null);
-  const [viewItem,   setViewItem]   = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editData, setEditData] = useState(null);
+  const [viewItem, setViewItem] = useState(null);
   const [deleteItem, setDeleteItem] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  const enriched = useMemo(() =>
-    quals.map(q => ({
-      ...q,
-      status:       getStatus(q.expiryDate),
-      daysLeft:     getDaysLeft(q.expiryDate),
-      traineeName:  TRAINEES.find(t => t.id === q.traineeId)?.name || "—",
-      traineeCode:  TRAINEES.find(t => t.id === q.traineeId)?.traineeId || "—",
-      qualTypeName: QUAL_TYPES.find(qt => qt.id === q.qualificationTypeId)?.name || "—",
-    })),
-  [quals]);
+  useEffect(() => {
+    loadPageData();
+  }, []);
 
-  const filtered = useMemo(() =>
-    enriched
-      .filter(q => statusFilter === "ALL" || q.status === statusFilter)
-      .filter(q => {
-        const s = search.toLowerCase();
-        return !s || q.traineeName.toLowerCase().includes(s) || q.qualTypeName.toLowerCase().includes(s) || q.traineeCode.toLowerCase().includes(s);
-      })
-      .sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate)),
-  [enriched, statusFilter, search]);
+  async function loadPageData() {
+    setLoading(true);
+    setError("");
 
-  function handleSave(formData) {
-    if (editData) {
-      setQuals(qs => qs.map(q => q.id === editData.id ? { ...q, ...formData } : q));
-    } else {
-      setQuals(qs => [...qs, { id: `q${Date.now()}`, ...formData }]);
+    try {
+      const [qualifications, types, traineeList] = await Promise.all([
+        getAllQualifications(),
+        getQualificationTypes(),
+        getTrainees(),
+      ]);
+
+      setQuals(qualifications);
+      setQualificationTypes(types);
+      setTrainees(traineeList);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
     }
-    setShowForm(false);
-    setEditData(null);
   }
 
-  function handleDelete(id) {
-    setQuals(qs => qs.filter(q => q.id !== id));
-    setDeleteItem(null);
+  const enriched = useMemo(
+    () => quals.map(enrichQualification),
+    [quals]
+  );
+
+  const traineeOptions = useMemo(() => {
+    if (trainees.length > 0) {
+      return trainees;
+    }
+
+    const seen = new Map();
+
+    enriched.forEach((qualification) => {
+      if (!seen.has(qualification.traineeId)) {
+        seen.set(qualification.traineeId, {
+          id: qualification.traineeId,
+          name: qualification.traineeName,
+          traineeId: qualification.traineeCode,
+        });
+      }
+    });
+
+    if (editData && !seen.has(editData.traineeId)) {
+      seen.set(editData.traineeId, {
+        id: editData.traineeId,
+        name: editData.traineeName,
+        traineeId: editData.traineeCode,
+      });
+    }
+
+    return Array.from(seen.values()).sort((left, right) =>
+      left.name.localeCompare(right.name)
+    );
+  }, [editData, enriched, trainees]);
+
+  const filtered = useMemo(
+    () =>
+      enriched
+        .filter((qualification) => {
+          return statusFilter === "ALL" || qualification.status === statusFilter;
+        })
+        .filter((qualification) => {
+          const term = search.trim().toLowerCase();
+
+          return (
+            !term ||
+            qualification.traineeName.toLowerCase().includes(term) ||
+            qualification.qualTypeName.toLowerCase().includes(term) ||
+            qualification.traineeCode.toLowerCase().includes(term)
+          );
+        })
+        .sort(
+          (left, right) =>
+            new Date(left.expiryDate).getTime() - new Date(right.expiryDate).getTime()
+        ),
+    [enriched, search, statusFilter]
+  );
+
+  async function handleSave(formData) {
+    setIsSaving(true);
+    setFormError("");
+
+    try {
+      if (editData) {
+        await updateQualification(editData.id, formData);
+      } else {
+        await createQualification(formData);
+      }
+
+      await loadPageData();
+      setShowForm(false);
+      setEditData(null);
+    } catch (requestError) {
+      setFormError(requestError.message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleDelete(id) {
+    setIsDeleting(true);
+    setError("");
+
+    try {
+      await deleteQualification(id);
+      await loadPageData();
+      setDeleteItem(null);
+      setViewItem(null);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  function openEdit(qualification) {
+    setFormError("");
+    setEditData(qualification);
+    setViewItem(null);
+    setShowForm(true);
+  }
+
+  function openDelete(qualification) {
+    setDeleteItem(qualification);
     setViewItem(null);
   }
 
-  function openEdit(qual) { setEditData(qual); setViewItem(null); setShowForm(true); }
-  function openDelete(qual) { setDeleteItem(qual); setViewItem(null); }
-
   return (
     <div style={{ padding: "28px 32px", maxWidth: "1200px", margin: "0 auto" }}>
-
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "24px" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-end",
+          marginBottom: "24px",
+        }}
+      >
         <div>
           <h1 style={{ margin: 0, fontSize: "22px", fontWeight: "700", color: "#111827" }}>
             Qualifications & Certifications
@@ -76,19 +192,117 @@ export default function QMSPage() {
             Track trainee certifications and expiry dates
           </p>
         </div>
-        <button onClick={() => { setEditData(null); setShowForm(true); }} style={{ padding: "9px 20px", background: "#2563eb", color: "#fff", border: "none", borderRadius: "7px", fontWeight: "600", fontSize: "14px", cursor: "pointer" }}>
+        <button
+          onClick={() => {
+            setFormError("");
+            setEditData(null);
+            setShowForm(true);
+          }}
+          style={primaryBtn}
+          disabled={loading}
+        >
           + New Qualification
         </button>
       </div>
 
-      <StatsRow quals={enriched} />
-      <FilterBar search={search} onSearch={setSearch} statusFilter={statusFilter} onStatusFilter={setStatusFilter} />
-      <QualTable quals={filtered} onView={q => setViewItem(q)} onEdit={openEdit} onDelete={openDelete} />
-      <p style={{ margin: "10px 0 0", fontSize: "13px", color: "#9ca3af" }}>Showing {filtered.length} of {enriched.length} records</p>
+      {error ? <ErrorBanner message={error} /> : null}
+      {loading ? <LoadingState label="Loading qualifications..." /> : null}
 
-      <QualModal     isOpen={showForm}    onClose={() => { setShowForm(false); setEditData(null); }} onSave={handleSave} initialData={editData} />
-      <DetailModal   qual={viewItem}      onClose={() => setViewItem(null)}    onEdit={openEdit}   onDelete={openDelete} />
-      <DeleteConfirm qual={deleteItem}    onConfirm={handleDelete}             onCancel={() => setDeleteItem(null)} />
+      {!loading ? (
+        <>
+          <StatsRow quals={enriched} />
+          <FilterBar
+            search={search}
+            onSearch={setSearch}
+            statusFilter={statusFilter}
+            onStatusFilter={setStatusFilter}
+          />
+          <QualTable
+            quals={filtered}
+            onView={(qualification) => setViewItem(qualification)}
+            onEdit={openEdit}
+            onDelete={openDelete}
+          />
+          <p style={{ margin: "10px 0 0", fontSize: "13px", color: "#9ca3af" }}>
+            Showing {filtered.length} of {enriched.length} records
+          </p>
+        </>
+      ) : null}
+
+      <QualModal
+        isOpen={showForm}
+        onClose={() => {
+          if (isSaving) return;
+          setShowForm(false);
+          setEditData(null);
+          setFormError("");
+        }}
+        onSave={handleSave}
+        initialData={editData}
+        traineeOptions={traineeOptions}
+        qualificationTypeOptions={qualificationTypes}
+        isSaving={isSaving}
+        error={formError}
+      />
+      <DetailModal
+        qual={viewItem}
+        onClose={() => setViewItem(null)}
+        onEdit={openEdit}
+        onDelete={openDelete}
+      />
+      <DeleteConfirm
+        qual={deleteItem}
+        onConfirm={handleDelete}
+        onCancel={() => {
+          if (!isDeleting) setDeleteItem(null);
+        }}
+      />
     </div>
   );
 }
+
+function ErrorBanner({ message }) {
+  return (
+    <div
+      style={{
+        marginBottom: "16px",
+        padding: "10px 12px",
+        borderRadius: "8px",
+        border: "1px solid #fca5a5",
+        background: "#fee2e2",
+        color: "#b91c1c",
+        fontSize: "13px",
+      }}
+    >
+      {message}
+    </div>
+  );
+}
+
+function LoadingState({ label }) {
+  return (
+    <div
+      style={{
+        padding: "48px",
+        textAlign: "center",
+        color: "#6b7280",
+        background: "#fff",
+        border: "1px solid #e5e7eb",
+        borderRadius: "8px",
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
+const primaryBtn = {
+  padding: "9px 20px",
+  background: "#2563eb",
+  color: "#fff",
+  border: "none",
+  borderRadius: "7px",
+  fontWeight: "600",
+  fontSize: "14px",
+  cursor: "pointer",
+};
