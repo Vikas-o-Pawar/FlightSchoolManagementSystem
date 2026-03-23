@@ -1,0 +1,173 @@
+//// Docs: https://dbml.dbdiagram.io/docs
+//// -- LEVEL 1
+//// -- Schemas, Tables and References
+
+// Creating tables
+// You can define the tables with full schema names
+
+Enum "trainees_status_enum" {
+  "ACTIVE"
+  "ON_HOLD"
+  "COMPLETED"
+  "DROPPED"
+}
+
+Table "trainees" {
+  "id" VARCHAR(191) [pk, not null]
+  "traineeId" VARCHAR(191) [not null]
+  "name" VARCHAR(191) [not null]
+  "email" VARCHAR(191) [not null]
+  "phone" VARCHAR(191)
+  "dob" DATETIME(3)
+  "enrollmentDate" DATETIME(3) [not null, default: `CURRENT_TIMESTAMP(3)`]
+  "course" VARCHAR(191) [not null]
+  "licenseType" VARCHAR(191)
+  "status" trainees_status_enum [not null, default: 'ACTIVE']
+  "createdAt" DATETIME(3) [not null, default: `CURRENT_TIMESTAMP(3)`]
+  "updatedAt" DATETIME(3) [not null]
+
+  Indexes {
+    traineeId [unique, name: "trainees_traineeId_key"]
+    email [unique, name: "trainees_email_key"]
+  }
+}
+
+Table "sessions" {
+  "id" VARCHAR(191) [pk, not null]
+  "traineeId" VARCHAR(191) [not null]
+  "date" DATETIME(3) [not null]
+  "instructor" VARCHAR(191) [not null]
+  "aircraft" VARCHAR(191)
+  "grade" INTEGER [not null]
+  "notes" TEXT
+  "createdAt" DATETIME(3) [not null, default: `CURRENT_TIMESTAMP(3)`]
+}
+
+Table "competencies" {
+  "id" VARCHAR(191) [pk, not null]
+  "traineeId" VARCHAR(191) [not null]
+  "navigation" INTEGER [not null, default: 0]
+  "communication" INTEGER [not null, default: 0]
+  "procedures" INTEGER [not null, default: 0]
+  "airmanship" INTEGER [not null, default: 0]
+  "emergencies" INTEGER [not null, default: 0]
+}
+
+Table "flight_hours" {
+  "id" VARCHAR(191) [pk, not null]
+  "traineeId" VARCHAR(191) [not null]
+  "totalHours" DOUBLE [not null, default: 0]
+  "simulatorHours" DOUBLE [not null, default: 0]
+  "aircraftHours" DOUBLE [not null, default: 0]
+  "targetHours" DOUBLE [not null, default: 200]
+
+  Indexes {
+    traineeId [unique, name: "flight_hours_traineeId_key"]
+  }
+}
+
+// -----------------------------
+// T6: QMS — Qualifications
+// -----------------------------
+
+Enum "qualification_status_enum" {
+  "VALID"
+  "EXPIRING"
+  "EXPIRED"
+  "REVOKED"
+}
+
+Enum "alert_type_enum" {
+  "30_DAYS"
+  "60_DAYS"
+  "90_DAYS"
+}
+
+Enum "resource_type_enum" {
+  "AIRCRAFT"
+  "SIMULATOR"
+}
+
+Table "qualification_types" {
+  "id" VARCHAR(191) [pk, not null]
+  "name" VARCHAR(191) [not null]
+  "description" TEXT
+  "validityDays" INTEGER [not null]
+  "createdAt" DATETIME(3) [not null, default: `CURRENT_TIMESTAMP(3)`]
+}
+
+Table "trainee_qualifications" {
+  "id" VARCHAR(191) [pk, not null]
+  "traineeId" VARCHAR(191) [not null]
+  "qualificationTypeId" VARCHAR(191) [not null]
+  "issuedDate" DATETIME(3) [not null]
+  "expiryDate" DATETIME(3) [not null]
+  "status" qualification_status_enum [not null]
+  "certificateUrl" TEXT
+  "verified" BOOLEAN [not null, default: false]
+  "createdAt" DATETIME(3) [not null, default: `CURRENT_TIMESTAMP(3)`]
+
+  Indexes {
+    (traineeId, qualificationTypeId) [unique, name: "uq_trainee_qualification"]
+  }
+}
+
+Table "qualification_renewals" {
+  "id" VARCHAR(191) [pk, not null]
+  "traineeQualificationId" VARCHAR(191) [not null]
+  "renewedOn" DATETIME(3) [not null]
+  "newExpiryDate" DATETIME(3) [not null]
+  "notes" TEXT
+  "createdAt" DATETIME(3) [not null, default: `CURRENT_TIMESTAMP(3)`]
+}
+
+Table "qualification_alerts" {
+  "id" VARCHAR(191) [pk, not null]
+  "traineeQualificationId" VARCHAR(191) [not null]
+  "alertType" alert_type_enum
+  "isSent" BOOLEAN [not null, default: false]
+  "sentAt" DATETIME(3)
+  "createdAt" DATETIME(3) [not null, default: `CURRENT_TIMESTAMP(3)`]
+}
+
+Table "resources" {
+  "id" VARCHAR(191) [pk, not null]
+  "name" VARCHAR(191) [not null]
+  "type" resource_type_enum [not null]
+  "status" VARCHAR(50)
+  "createdAt" DATETIME(3) [not null, default: `CURRENT_TIMESTAMP(3)`]
+}
+
+Table "resource_qualifications" {
+  "id" VARCHAR(191) [pk, not null]
+  "resourceId" VARCHAR(191) [not null]
+  "qualificationTypeId" VARCHAR(191) [not null]
+
+  Indexes {
+    (resourceId, qualificationTypeId) [unique, name: "resource_qualifications_unique"]
+  }
+}
+
+// -----------------------------
+// Relations
+// -----------------------------
+
+Ref "tq_trainee_fkey": "trainees"."id" < "trainee_qualifications"."traineeId" [delete: cascade, update: cascade]
+
+Ref "tq_type_fkey": "qualification_types"."id" < "trainee_qualifications"."qualificationTypeId"
+
+Ref "renewals_tq_fkey": "trainee_qualifications"."id" < "qualification_renewals"."traineeQualificationId" [delete: cascade]
+
+Ref "alerts_tq_fkey": "trainee_qualifications"."id" < "qualification_alerts"."traineeQualificationId" [delete: cascade]
+
+Ref "rq_resource_fkey": "resources"."id" < "resource_qualifications"."resourceId" [delete: cascade]
+
+Ref "rq_type_fkey": "qualification_types"."id" < "resource_qualifications"."qualificationTypeId"
+
+Ref "sessions_traineeId_fkey":"trainees"."id" < "sessions"."traineeId" [update: cascade, delete: cascade]
+
+Ref "competencies_traineeId_fkey":"trainees"."id" < "competencies"."traineeId" [update: cascade, delete: cascade]
+
+Ref "flight_hours_traineeId_fkey":"trainees"."id" < "flight_hours"."traineeId" [update: cascade, delete: cascade]
+
+Don't be pednatic
