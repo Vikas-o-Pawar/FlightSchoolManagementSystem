@@ -1,15 +1,12 @@
 import { useMemo, useState } from "react";
-import {
-  processMilestone,
-  MILESTONE_LABELS,
-  MILESTONE_RULES,
-} from "../utils/renewalEngine";
+import { MILESTONE_LABELS, MILESTONE_RULES } from "../utils/renewalEngine";
 
 export default function MilestonePanel({
   allQuals,
-  renewalHistory,
+  onPreview,
   onApply,
   isApplying = false,
+  error = "",
 }) {
   const [traineeId, setTraineeId] = useState("");
   const [milestoneType, setMilestoneType] = useState("");
@@ -34,26 +31,19 @@ export default function MilestonePanel({
     );
   }, [allQuals]);
 
-  function handlePreview() {
+  async function handlePreview() {
     if (!traineeId || !milestoneType) {
-      alert("Please select both a trainee and a milestone.");
       return;
     }
 
-    const results = processMilestone(
-      traineeId,
-      milestoneType,
-      allQuals,
-      renewalHistory
-    );
-
+    const results = await onPreview({ traineeId, milestoneType });
     setPreview(results);
     setApplied(false);
   }
 
   async function handleApply() {
     if (!preview) return;
-    await onApply(traineeId, milestoneType, preview.filter((result) => result.eligible));
+    await onApply(traineeId, milestoneType);
     setApplied(true);
   }
 
@@ -80,7 +70,7 @@ export default function MilestonePanel({
           Milestone Trigger
         </h3>
         <p style={{ margin: "3px 0 0", fontSize: "12px", color: "#6b7280" }}>
-          Simulate a training milestone and see which qualifications auto-renew
+          Preview and apply backend-driven auto-renewals for milestone events
         </p>
       </div>
 
@@ -151,13 +141,33 @@ export default function MilestonePanel({
           </div>
         ) : null}
 
-        <button onClick={handlePreview} style={primaryBtn} disabled={isApplying}>
+        <button
+          onClick={handlePreview}
+          style={primaryBtn}
+          disabled={isApplying || !traineeId || !milestoneType}
+        >
           Preview Auto-Renewals
         </button>
       </div>
 
       {preview ? (
         <div style={{ padding: "18px" }}>
+          {error ? (
+            <div
+              style={{
+                background: "#fee2e2",
+                border: "1px solid #fca5a5",
+                borderRadius: "6px",
+                color: "#b91c1c",
+                fontSize: "13px",
+                padding: "10px 12px",
+                marginBottom: "14px",
+              }}
+            >
+              {error}
+            </div>
+          ) : null}
+
           {willRenew.length > 0 ? (
             <div style={{ marginBottom: "16px" }}>
               <p
@@ -171,38 +181,12 @@ export default function MilestonePanel({
                 Will be renewed ({willRenew.length})
               </p>
               {willRenew.map((result) => (
-                <div
-                  key={result.qual.id}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "10px 14px",
-                    background: "#f0fdf4",
-                    border: "1px solid #bbf7d0",
-                    borderRadius: "6px",
-                    marginBottom: "8px",
-                  }}
-                >
-                  <div>
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: "14px",
-                        fontWeight: "600",
-                        color: "#111827",
-                      }}
-                    >
-                      {result.qual.qualTypeName}
-                    </p>
-                    <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#6b7280" }}>
-                      Current expiry: {result.qual.expiryDate}
-                    </p>
-                  </div>
-                  <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: "600" }}>
-                    RENEW
-                  </span>
-                </div>
+                <PreviewCard
+                  key={result.qualification.id}
+                  qualification={result.qualification}
+                  reason={result.reason}
+                  mode="renew"
+                />
               ))}
             </div>
           ) : null}
@@ -220,38 +204,12 @@ export default function MilestonePanel({
                 Skipped ({skipped.length})
               </p>
               {skipped.map((result) => (
-                <div
-                  key={result.qual.id}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "10px 14px",
-                    background: "#fffbeb",
-                    border: "1px solid #fde68a",
-                    borderRadius: "6px",
-                    marginBottom: "8px",
-                  }}
-                >
-                  <div>
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: "14px",
-                        fontWeight: "600",
-                        color: "#111827",
-                      }}
-                    >
-                      {result.qual.qualTypeName}
-                    </p>
-                    <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#92400e" }}>
-                      {result.reason}
-                    </p>
-                  </div>
-                  <span style={{ fontSize: "12px", color: "#d97706", fontWeight: "600" }}>
-                    SKIP
-                  </span>
-                </div>
+                <PreviewCard
+                  key={result.qualification.id}
+                  qualification={result.qualification}
+                  reason={result.reason}
+                  mode="skip"
+                />
               ))}
             </div>
           ) : null}
@@ -299,6 +257,56 @@ export default function MilestonePanel({
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function PreviewCard({ qualification, reason, mode }) {
+  const isRenew = mode === "renew";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "10px 14px",
+        background: isRenew ? "#f0fdf4" : "#fffbeb",
+        border: `1px solid ${isRenew ? "#bbf7d0" : "#fde68a"}`,
+        borderRadius: "6px",
+        marginBottom: "8px",
+      }}
+    >
+      <div>
+        <p
+          style={{
+            margin: 0,
+            fontSize: "14px",
+            fontWeight: "600",
+            color: "#111827",
+          }}
+        >
+          {qualification.qualification_types?.name || "-"}
+        </p>
+        <p
+          style={{
+            margin: "2px 0 0",
+            fontSize: "12px",
+            color: isRenew ? "#6b7280" : "#92400e",
+          }}
+        >
+          {reason || `Current expiry: ${qualification.expiryDate}`}
+        </p>
+      </div>
+      <span
+        style={{
+          fontSize: "12px",
+          color: isRenew ? "#16a34a" : "#d97706",
+          fontWeight: "600",
+        }}
+      >
+        {isRenew ? "RENEW" : "SKIP"}
+      </span>
     </div>
   );
 }

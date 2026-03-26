@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   createQualification,
   deleteQualification,
+  generateCertificate,
+  getAlerts,
   getAllQualifications,
   getQualificationTypes,
   getTrainees,
@@ -28,6 +30,7 @@ function enrichQualification(qualification) {
 
 export default function QMSPage() {
   const [quals, setQuals] = useState([]);
+  const [alerts, setAlerts] = useState([]);
   const [trainees, setTrainees] = useState([]);
   const [qualificationTypes, setQualificationTypes] = useState([]);
   const [search, setSearch] = useState("");
@@ -41,25 +44,36 @@ export default function QMSPage() {
   const [formError, setFormError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isGeneratingCertificate, setIsGeneratingCertificate] = useState(false);
+  const [certificateMessage, setCertificateMessage] = useState("");
 
   useEffect(() => {
     loadPageData();
   }, []);
 
-  async function loadPageData() {
+  async function loadPageData({ keepViewId } = {}) {
     setLoading(true);
     setError("");
 
     try {
-      const [qualifications, types, traineeList] = await Promise.all([
+      const [qualifications, activeAlerts, types, traineeList] = await Promise.all([
         getAllQualifications(),
+        getAlerts(),
         getQualificationTypes(),
         getTrainees(),
       ]);
 
       setQuals(qualifications);
+      setAlerts(activeAlerts);
       setQualificationTypes(types);
       setTrainees(traineeList);
+
+      if (keepViewId) {
+        const refreshedQualification = qualifications.find(
+          (qualification) => qualification.id === keepViewId
+        );
+        setViewItem(refreshedQualification ? enrichQualification(refreshedQualification) : null);
+      }
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -67,10 +81,7 @@ export default function QMSPage() {
     }
   }
 
-  const enriched = useMemo(
-    () => quals.map(enrichQualification),
-    [quals]
-  );
+  const enriched = useMemo(() => quals.map(enrichQualification), [quals]);
 
   const traineeOptions = useMemo(() => {
     if (trainees.length > 0) {
@@ -125,6 +136,11 @@ export default function QMSPage() {
     [enriched, search, statusFilter]
   );
 
+  const urgentAlerts = alerts.filter((alert) => alert.severity === "urgent");
+  const expiringSoonAlerts = alerts.filter(
+    (alert) => alert.severity === "expiring_soon"
+  );
+
   async function handleSave(formData) {
     setIsSaving(true);
     setFormError("");
@@ -164,14 +180,32 @@ export default function QMSPage() {
 
   function openEdit(qualification) {
     setFormError("");
+    setCertificateMessage("");
     setEditData(qualification);
     setViewItem(null);
     setShowForm(true);
   }
 
   function openDelete(qualification) {
+    setCertificateMessage("");
     setDeleteItem(qualification);
     setViewItem(null);
+  }
+
+  async function handleGenerateCertificate(id) {
+    setIsGeneratingCertificate(true);
+    setError("");
+    setCertificateMessage("");
+
+    try {
+      await generateCertificate(id);
+      await loadPageData({ keepViewId: id });
+      setCertificateMessage("Certificate generated successfully.");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setIsGeneratingCertificate(false);
+    }
   }
 
   return (
@@ -189,7 +223,7 @@ export default function QMSPage() {
             Qualifications & Certifications
           </h1>
           <p style={{ margin: "4px 0 0", fontSize: "14px", color: "#6b7280" }}>
-            Track trainee certifications and expiry dates
+            Track trainee certifications, expiry dates, alerts, and certificates
           </p>
         </div>
         <button
@@ -199,7 +233,7 @@ export default function QMSPage() {
             setShowForm(true);
           }}
           style={primaryBtn}
-          disabled={loading}
+          disabled={loading || isSaving}
         >
           + New Qualification
         </button>
@@ -210,6 +244,7 @@ export default function QMSPage() {
 
       {!loading ? (
         <>
+          <AlertPanel urgentAlerts={urgentAlerts} expiringSoonAlerts={expiringSoonAlerts} />
           <StatsRow quals={enriched} />
           <FilterBar
             search={search}
@@ -232,7 +267,10 @@ export default function QMSPage() {
       <QualModal
         isOpen={showForm}
         onClose={() => {
-          if (isSaving) return;
+          if (isSaving) {
+            return;
+          }
+
           setShowForm(false);
           setEditData(null);
           setFormError("");
@@ -246,17 +284,64 @@ export default function QMSPage() {
       />
       <DetailModal
         qual={viewItem}
-        onClose={() => setViewItem(null)}
+        onClose={() => {
+          setViewItem(null);
+          setCertificateMessage("");
+        }}
         onEdit={openEdit}
         onDelete={openDelete}
+        onGenerateCertificate={handleGenerateCertificate}
+        isGeneratingCertificate={isGeneratingCertificate}
+        certificateMessage={certificateMessage}
       />
       <DeleteConfirm
         qual={deleteItem}
         onConfirm={handleDelete}
         onCancel={() => {
-          if (!isDeleting) setDeleteItem(null);
+          if (!isDeleting) {
+            setDeleteItem(null);
+          }
         }}
       />
+    </div>
+  );
+}
+
+function AlertPanel({ urgentAlerts, expiringSoonAlerts }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "24px" }}>
+      <AlertCard
+        title="Urgent Alerts"
+        value={urgentAlerts.length}
+        subtitle="30-day renewals needing attention"
+        color="#dc2626"
+      />
+      <AlertCard
+        title="Expiring Soon"
+        value={expiringSoonAlerts.length}
+        subtitle="60 or 90 day alert windows"
+        color="#d97706"
+      />
+    </div>
+  );
+}
+
+function AlertCard({ title, value, subtitle, color }) {
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: "1px solid #e5e7eb",
+        borderRadius: "8px",
+        padding: "16px 20px",
+        borderTop: `4px solid ${color}`,
+      }}
+    >
+      <div style={{ fontSize: "28px", fontWeight: "700", color }}>{value}</div>
+      <div style={{ fontSize: "13px", color: "#111827", fontWeight: "600", marginTop: "4px" }}>
+        {title}
+      </div>
+      <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>{subtitle}</div>
     </div>
   );
 }

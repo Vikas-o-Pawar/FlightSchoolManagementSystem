@@ -1,11 +1,3 @@
-// Returns "VALID" | "EXPIRING" | "EXPIRED"
-export function getStatus(expiryDate) {
-  const days = getDaysLeft(expiryDate);
-  if (days < 0)   return "EXPIRED";
-  if (days <= 90) return "EXPIRING";
-  return "VALID";
-}
-
 // Returns how many days until expiry (negative = already expired)
 export function getDaysLeft(expiryDate) {
   return Math.floor((new Date(expiryDate) - new Date()) / 86400000);
