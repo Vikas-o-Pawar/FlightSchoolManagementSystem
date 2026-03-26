@@ -66,6 +66,12 @@ const normalizeDateOnly = (value) => {
   return parsedDate;
 };
 
+const getDaysLeft = (expiryDate) => {
+  const today = normalizeDateOnly(new Date());
+  const normalizedExpiryDate = normalizeDateOnly(expiryDate);
+  return Math.floor((normalizedExpiryDate.getTime() - today.getTime()) / 86400000);
+};
+
 const deriveQualificationStatus = (expiryDate, currentStatus) => {
   if (currentStatus === QUALIFICATION_STATUSES.REVOKED) {
     return QUALIFICATION_STATUSES.REVOKED;
@@ -283,6 +289,13 @@ const updateTraineeQualification = async (
       throw new ServiceError("Invalid status value.", 400);
     }
 
+    if (status !== QUALIFICATION_STATUSES.REVOKED) {
+      throw new ServiceError(
+        "Status is derived by the backend. Only REVOKED can be set explicitly.",
+        400
+      );
+    }
+
     updateData.status = status;
   }
 
@@ -365,12 +378,33 @@ const createQualificationRenewal = async ({
 
   const normalizedRenewedOn = normalizeDateOnly(renewedOn);
   const normalizedNewExpiryDate = normalizeDateOnly(newExpiryDate);
+  const daysLeft = getDaysLeft(qualification.expiryDate);
 
   if (normalizedNewExpiryDate <= normalizeDateOnly(qualification.expiryDate)) {
     throw new ServiceError(
       "newExpiryDate must be later than the current expiry date.",
       400
     );
+  }
+
+  if (
+    qualification.status === QUALIFICATION_STATUSES.VALID &&
+    daysLeft > 60
+  ) {
+    throw new ServiceError(
+      "Renewal is blocked while the qualification is valid and expires more than 60 days away.",
+      400
+    );
+  }
+
+  if (notes !== undefined && notes !== null) {
+    if (typeof notes !== "string") {
+      throw new ServiceError("notes must be a string.", 400);
+    }
+
+    if (notes.length > 500) {
+      throw new ServiceError("notes must be 500 characters or fewer.", 400);
+    }
   }
 
   return prisma.$transaction(async (tx) => {
@@ -418,6 +452,7 @@ const deleteTraineeQualification = async (id) => {
 module.exports = {
   QUALIFICATION_STATUSES,
   ServiceError,
+  deriveQualificationStatus,
   createTraineeQualification,
   createQualificationRenewal,
   getAllTraineeQualifications,

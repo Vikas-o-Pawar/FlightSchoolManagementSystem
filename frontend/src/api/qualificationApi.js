@@ -8,6 +8,11 @@ const QUALIFICATION_TYPES_PATH =
 const QUALIFICATION_RENEWALS_PATH =
   import.meta.env.VITE_QUALIFICATION_RENEWALS_PATH || "/qualification-renewals";
 const TRAINEES_PATH = import.meta.env.VITE_TRAINEES_PATH || "/trainees";
+const AUTOMATION_PATH = import.meta.env.VITE_AUTOMATION_PATH || "/automation";
+const ALERTS_PATH = import.meta.env.VITE_ALERTS_PATH || "/alerts";
+const RESOURCES_PATH = import.meta.env.VITE_RESOURCES_PATH || "/resources";
+const CERTIFICATES_PATH =
+  import.meta.env.VITE_CERTIFICATES_PATH || "/certificates";
 
 function buildUrl(path, query) {
   const url = new URL(`${API_BASE_URL}${path}`);
@@ -47,6 +52,16 @@ function normalizeQualification(qualification) {
     qualification_renewals: Array.isArray(qualification.qualification_renewals)
       ? qualification.qualification_renewals.map(normalizeRenewal)
       : [],
+  };
+}
+
+function normalizeAlert(alert) {
+  return {
+    ...alert,
+    expiry: toDateOnly(alert.expiry),
+    createdAt: toDateOnly(alert.createdAt),
+    trainee: alert.trainee || { id: null, name: "-", code: "-" },
+    qualification: alert.qualification || { id: null, name: "-" },
   };
 }
 
@@ -113,7 +128,6 @@ export async function getQualificationTypes() {
 
 export async function getTrainees() {
   const data = await request(TRAINEES_PATH);
-  console.log(data);
   return Array.isArray(data) ? data : [];
 }
 
@@ -150,4 +164,63 @@ export async function createRenewal(payload) {
         newExpiryDate: toDateOnly(data.newExpiryDate),
       }
     : null;
+}
+
+export async function previewMilestoneRenewal(payload) {
+  const data = await request(`${AUTOMATION_PATH}/milestone-renewal/preview`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+  return Array.isArray(data)
+    ? data.map((item) => ({
+        ...item,
+        qualification: normalizeQualification(item.qualification),
+      }))
+    : [];
+}
+
+export async function applyMilestoneRenewal(payload) {
+  const data = await request(`${AUTOMATION_PATH}/milestone-renewal`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+  return Array.isArray(data) ? data.map(normalizeQualification) : [];
+}
+
+export async function getAlerts() {
+  const data = await request(ALERTS_PATH);
+  return Array.isArray(data) ? data.map(normalizeAlert) : [];
+}
+
+export async function runAlerts() {
+  const data = await request(`${ALERTS_PATH}/run`, {
+    method: "POST",
+  });
+
+  return Array.isArray(data) ? data : [];
+}
+
+export async function getResourceDashboard() {
+  const data = await request(`${RESOURCES_PATH}/dashboard`);
+  return Array.isArray(data) ? data : [];
+}
+
+export async function generateCertificate(traineeQualificationId) {
+  const data = await request(`${CERTIFICATES_PATH}/generate`, {
+    method: "POST",
+    body: JSON.stringify({ traineeQualificationId }),
+  });
+
+  return normalizeQualification(data);
+}
+
+export function getCertificateDownloadUrl(qualification) {
+  if (qualification?.certificateUrl) {
+    const apiOrigin = new URL(API_BASE_URL).origin;
+    return `${apiOrigin}${qualification.certificateUrl}`;
+  }
+
+  return buildUrl(`${CERTIFICATES_PATH}/${qualification?.id || ""}`);
 }

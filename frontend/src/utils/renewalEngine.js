@@ -1,137 +1,57 @@
-// Which milestone types can trigger which qualification type renewals
 export const MILESTONE_RULES = {
-  COURSE_COMPLETE: ["atpl theory", "ir rating", "type rating a320", "crm certificate"],
-  ASSESSMENT_PASSED: ["medical class 1"],
+  FLIGHT_HOURS: ["atpl theory", "ir rating", "type rating a320"],
+  COURSE_COMPLETION: ["atpl theory", "crm certificate", "medical class 1"],
   SIMULATOR_SESSION: ["ir rating", "type rating a320"],
-  ANNUAL_CHECK: ["atpl theory", "medical class 1", "crm certificate"],
+  ANNUAL_CHECK: ["medical class 1", "crm certificate"],
 };
 
-// Human-readable milestone labels
 export const MILESTONE_LABELS = {
-  COURSE_COMPLETE:   "Course Completion",
-  ASSESSMENT_PASSED: "Assessment Passed",
+  FLIGHT_HOURS: "Flight Hours",
+  COURSE_COMPLETION: "Course Completion",
   SIMULATOR_SESSION: "Simulator Session",
-  ANNUAL_CHECK:      "Annual Check",
+  ANNUAL_CHECK: "Annual Check",
 };
 
-// ── 1. Expiry Calculation ─────────────────────────────────────────────────────
-
-/**
- * Given an issued date and validity in days, returns the expiry date string.
- */
 export function calculateExpiry(issuedDate, validityDays) {
-  const d = new Date(issuedDate);
-  d.setDate(d.getDate() + validityDays);
-  return d.toISOString().split("T")[0];
+  const date = new Date(issuedDate);
+  date.setDate(date.getDate() + validityDays);
+  return date.toISOString().split("T")[0];
 }
 
-/**
- * Given a current expiry date and validity in days, returns the NEW expiry
- * after renewal (extends from today if expired, or from current expiry if still valid).
- */
 export function calculateRenewedExpiry(currentExpiry, validityDays) {
-  const base = new Date(currentExpiry) > new Date() ? new Date(currentExpiry) : new Date();
-  base.setDate(base.getDate() + validityDays);
-  return base.toISOString().split("T")[0];
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  const current = new Date(currentExpiry);
+  current.setHours(0, 0, 0, 0);
+
+  const baseDate = current > now ? current : now;
+  baseDate.setDate(baseDate.getDate() + validityDays);
+  return baseDate.toISOString().split("T")[0];
 }
 
-// ── 2. Eligibility Check ──────────────────────────────────────────────────────
-
-/**
- * Returns { eligible: bool, reason: string }
- * Rules:
- *  - Must not be REVOKED
- *  - Must not have been renewed in the last 30 days (gap rule)
- *  - Expiry must be within 180 days (future) or already expired
- */
-export function checkEligibility(qual, renewalHistory = []) {
+export function checkEligibility(qual) {
   if (qual.status === "REVOKED") {
     return { eligible: false, reason: "Qualification has been revoked." };
-  }
-
-  const lastRenewal = renewalHistory
-    .filter(r => r.traineeQualificationId === qual.id)
-    .sort((a, b) => new Date(b.renewedOn) - new Date(a.renewedOn))[0];
-
-  if (lastRenewal) {
-    const daysSinceLast = Math.floor(
-      (new Date() - new Date(lastRenewal.renewedOn)) / 86400000
-    );
-    if (daysSinceLast < 30) {
-      return {
-        eligible: false,
-        reason: `Already renewed ${daysSinceLast} days ago. Must wait ${30 - daysSinceLast} more days.`,
-      };
-    }
   }
 
   const daysToExpiry = Math.floor(
     (new Date(qual.expiryDate) - new Date()) / 86400000
   );
-  if (daysToExpiry > 180) {
+
+  if (qual.status === "VALID" && daysToExpiry > 60) {
     return {
       eligible: false,
-      reason: `Expiry is ${daysToExpiry} days away. Renewal only allowed within 180 days of expiry.`,
+      reason: "Qualification is still valid and expires more than 60 days away.",
     };
   }
 
-  return { eligible: true, reason: "Eligible for renewal." };
-}
-
-// ── 3. Milestone Trigger ──────────────────────────────────────────────────────
-
-/**
- * Given a milestone event, returns which qualifications for that trainee
- * should be auto-renewed.
- * Returns array of { qual, reason } objects.
- */
-export function processMilestone(traineeId, milestoneType, allQuals, renewalHistory = []) {
-  const eligibleTypeNames = MILESTONE_RULES[milestoneType] || [];
-
-  const traineeQuals = allQuals.filter(
-    q =>
-      q.traineeId === traineeId &&
-      eligibleTypeNames.includes(
-        String(q.qualTypeName || q.qualification_types?.name || "").trim().toLowerCase()
-      )
-  );
-
-  const results = [];
-
-  for (const qual of traineeQuals) {
-    const { eligible, reason } = checkEligibility(qual, renewalHistory);
-    results.push({
-      qual,
-      eligible,
-      reason,
-      action: eligible ? "WILL_RENEW" : "SKIPPED",
-    });
-  }
-
-  return results;
-}
-
-// ── 4. Apply Renewal ──────────────────────────────────────────────────────────
-
-/**
- * Builds a renewal record object (to be saved / passed to state).
- */
-export function buildRenewalRecord(qualId, newExpiry, notes = "") {
   return {
-    id: `ren_${Date.now()}`,
-    traineeQualificationId: qualId,
-    renewedOn: new Date().toISOString().split("T")[0],
-    newExpiryDate: newExpiry,
-    notes,
+    eligible: true,
+    reason: "Eligible for renewal.",
   };
 }
 
-// ── 5. Verification Rules ─────────────────────────────────────────────────────
-
-/**
- * Validates whether a manual renewal submission satisfies all rules.
- * Returns array of error strings (empty = all good).
- */
 export function verifyRenewalRules(qual, newExpiry, notes) {
   const errors = [];
 
@@ -139,8 +59,16 @@ export function verifyRenewalRules(qual, newExpiry, notes) {
     errors.push("New expiry date is required.");
   } else if (new Date(newExpiry) <= new Date(qual.expiryDate)) {
     errors.push("New expiry date must be later than the current expiry date.");
-  } else if (new Date(newExpiry) <= new Date()) {
-    errors.push("New expiry date must be in the future.");
+  }
+
+  const daysToExpiry = Math.floor(
+    (new Date(qual.expiryDate) - new Date()) / 86400000
+  );
+
+  if (qual.status === "VALID" && daysToExpiry > 60) {
+    errors.push(
+      "Renewal is blocked while the qualification is valid and expires more than 60 days away."
+    );
   }
 
   if (notes && notes.length > 500) {

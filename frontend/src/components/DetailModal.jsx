@@ -1,10 +1,22 @@
 import { getDaysLeft } from "../utils/helpers";
+import { getCertificateDownloadUrl } from "../api/qualificationApi";
 import StatusBadge from "./StatusBadge";
 
-export default function DetailModal({ qual, onClose, onEdit, onDelete }) {
-  if (!qual) return null;
+export default function DetailModal({
+  qual,
+  onClose,
+  onEdit,
+  onDelete,
+  onGenerateCertificate,
+  isGeneratingCertificate = false,
+  certificateMessage = "",
+}) {
+  if (!qual) {
+    return null;
+  }
 
   const days = getDaysLeft(qual.expiryDate);
+  const downloadUrl = getCertificateDownloadUrl(qual);
 
   return (
     <div
@@ -108,19 +120,72 @@ export default function DetailModal({ qual, onClose, onEdit, onDelete }) {
             value={qual.validityDays ? `${qual.validityDays} days` : ""}
           />
           <InfoBox label="Verified" value={qual.verified ? "Yes" : "No"} />
+          <InfoBox
+            label="Certificate"
+            value={qual.certificateUrl ? "Available" : "Not Generated"}
+          />
         </div>
 
-        <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+        {certificateMessage ? (
+          <div
+            style={{
+              marginBottom: "16px",
+              padding: "10px 12px",
+              borderRadius: "8px",
+              border: "1px solid #86efac",
+              background: "#f0fdf4",
+              color: "#166534",
+              fontSize: "13px",
+            }}
+          >
+            {certificateMessage}
+          </div>
+        ) : null}
+
+        {qual.certificateUrl ? (
+          <div
+            style={{
+              marginBottom: "16px",
+              padding: "10px 12px",
+              borderRadius: "8px",
+              border: "1px solid #bfdbfe",
+              background: "#eff6ff",
+              color: "#1d4ed8",
+              fontSize: "13px",
+              wordBreak: "break-all",
+            }}
+          >
+            Stored certificate path: {qual.certificateUrl}
+          </div>
+        ) : null}
+
+        <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", flexWrap: "wrap" }}>
+          <button
+            onClick={() => onGenerateCertificate(qual.id)}
+            style={{ ...ghostBtn, color: "#2563eb", borderColor: "#2563eb" }}
+            disabled={isGeneratingCertificate}
+          >
+            {isGeneratingCertificate ? "Generating..." : "Generate Certificate"}
+          </button>
+          {qual.certificateUrl ? (
+            <a
+              href={downloadUrl}
+              style={{ ...ghostBtn, color: "#047857", borderColor: "#047857", textDecoration: "none" }}
+            >
+              Download
+            </a>
+          ) : null}
           <button
             onClick={() => onDelete(qual)}
             style={{ ...ghostBtn, color: "#dc2626", borderColor: "#dc2626" }}
+            disabled={isGeneratingCertificate}
           >
             Delete
           </button>
-          <button onClick={onClose} style={ghostBtn}>
+          <button onClick={onClose} style={ghostBtn} disabled={isGeneratingCertificate}>
             Close
           </button>
-          <button onClick={() => onEdit(qual)} style={primaryBtn}>
+          <button onClick={() => onEdit(qual)} style={primaryBtn} disabled={isGeneratingCertificate}>
             Edit
           </button>
         </div>
@@ -177,4 +242,7 @@ const ghostBtn = {
   fontWeight: "600",
   fontSize: "14px",
   cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
 };

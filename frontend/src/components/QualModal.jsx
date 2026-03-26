@@ -1,7 +1,4 @@
-// Modal form for CREATE and EDIT qualification
-// Props: isOpen, onClose, onSave, initialData (null = create mode)
-
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { addDaysToDate, today } from "../utils/helpers";
 
 const EMPTY = {
@@ -23,6 +20,7 @@ export default function QualModal({
   error = "",
 }) {
   const [form, setForm] = useState(EMPTY);
+  const [validationError, setValidationError] = useState("");
 
   useEffect(() => {
     setForm(
@@ -36,6 +34,7 @@ export default function QualModal({
           }
         : EMPTY
     );
+    setValidationError("");
   }, [initialData, isOpen]);
 
   const selectedType = qualificationTypeOptions.find(
@@ -49,6 +48,7 @@ export default function QualModal({
         ? addDaysToDate(form.issuedDate, nextType.validityDays)
         : "";
 
+    setValidationError("");
     setForm((current) => ({
       ...current,
       qualificationTypeId: typeId,
@@ -61,15 +61,17 @@ export default function QualModal({
       ? addDaysToDate(date, selectedType.validityDays)
       : form.expiryDate;
 
+    setValidationError("");
     setForm((current) => ({ ...current, issuedDate: date, expiryDate: expiry }));
   }
 
   function handleSubmit() {
     if (!form.traineeId || !form.qualificationTypeId || !form.issuedDate) {
-      alert("Please fill in all required fields.");
+      setValidationError("Please fill in all required fields.");
       return;
     }
 
+    setValidationError("");
     onSave({
       traineeId: form.traineeId,
       qualificationTypeId: form.qualificationTypeId,
@@ -78,22 +80,25 @@ export default function QualModal({
     });
   }
 
-  if (!isOpen) return null;
+  if (!isOpen) {
+    return null;
+  }
 
   return (
-    // Backdrop
     <div
       onClick={isSaving ? undefined : onClose}
       style={{
-        position: "fixed", inset: 0,
+        position: "fixed",
+        inset: 0,
         background: "rgba(0,0,0,0.4)",
-        display: "flex", alignItems: "center", justifyContent: "center",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         zIndex: 50,
       }}
     >
-      {/* Modal box */}
       <div
-        onClick={e => e.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
         style={{
           background: "#fff",
           borderRadius: "10px",
@@ -107,16 +112,29 @@ export default function QualModal({
           {initialData ? "Edit Qualification" : "New Qualification"}
         </h2>
 
-        {error ? (
-          <div style={{ marginBottom: "14px", padding: "10px 12px", borderRadius: "8px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#b91c1c", fontSize: "13px" }}>
-            {error}
+        {error || validationError ? (
+          <div
+            style={{
+              marginBottom: "14px",
+              padding: "10px 12px",
+              borderRadius: "8px",
+              border: "1px solid #fca5a5",
+              background: "#fee2e2",
+              color: "#b91c1c",
+              fontSize: "13px",
+            }}
+          >
+            {error || validationError}
           </div>
         ) : null}
 
         <Label text="Trainee *">
           <select
             value={form.traineeId}
-            onChange={(e) => setForm((current) => ({ ...current, traineeId: e.target.value }))}
+            onChange={(event) => {
+              setValidationError("");
+              setForm((current) => ({ ...current, traineeId: event.target.value }));
+            }}
             style={inputStyle}
             disabled={isSaving}
           >
@@ -132,7 +150,7 @@ export default function QualModal({
         <Label text="Qualification Type *">
           <select
             value={form.qualificationTypeId}
-            onChange={(e) => handleTypeChange(e.target.value)}
+            onChange={(event) => handleTypeChange(event.target.value)}
             style={inputStyle}
             disabled={isSaving}
           >
@@ -150,28 +168,46 @@ export default function QualModal({
             <input
               type="date"
               value={form.issuedDate}
-              onChange={(e) => handleIssuedChange(e.target.value)}
+              onChange={(event) => handleIssuedChange(event.target.value)}
               style={inputStyle}
               disabled={isSaving}
             />
           </Label>
           <Label text="Expiry Date">
-            <input type="date" value={form.expiryDate} readOnly style={{ ...inputStyle, background: "#f9fafb", color: "#6b7280" }} />
+            <input
+              type="date"
+              value={form.expiryDate}
+              readOnly
+              style={{ ...inputStyle, background: "#f9fafb", color: "#6b7280" }}
+            />
           </Label>
         </div>
 
-        <label style={{ display: "flex", alignItems: "center", gap: "8px", margin: "12px 0 20px", fontSize: "14px", cursor: "pointer" }}>
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            margin: "12px 0 20px",
+            fontSize: "14px",
+            cursor: "pointer",
+          }}
+        >
           <input
             type="checkbox"
             checked={form.verified}
-            onChange={(e) => setForm((current) => ({ ...current, verified: e.target.checked }))}
+            onChange={(event) => {
+              setForm((current) => ({ ...current, verified: event.target.checked }));
+            }}
             disabled={isSaving}
           />
           Mark as verified
         </label>
 
         <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={ghostBtn} disabled={isSaving}>Cancel</button>
+          <button onClick={onClose} style={ghostBtn} disabled={isSaving}>
+            Cancel
+          </button>
           <button onClick={handleSubmit} style={primaryBtn} disabled={isSaving}>
             {isSaving ? "Saving..." : initialData ? "Save Changes" : "Create"}
           </button>
@@ -181,12 +217,18 @@ export default function QualModal({
   );
 }
 
-// ─── tiny helpers ──────────────────────────────────────────────────────────────
-
 function Label({ text, children }) {
   return (
     <div style={{ marginBottom: "14px" }}>
-      <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#374151", marginBottom: "5px" }}>
+      <label
+        style={{
+          display: "block",
+          fontSize: "13px",
+          fontWeight: "600",
+          color: "#374151",
+          marginBottom: "5px",
+        }}
+      >
         {text}
       </label>
       {children}
@@ -195,19 +237,33 @@ function Label({ text, children }) {
 }
 
 const inputStyle = {
-  width: "100%", padding: "8px 10px",
-  border: "1px solid #d1d5db", borderRadius: "6px",
-  fontSize: "14px", outline: "none", boxSizing: "border-box",
+  width: "100%",
+  padding: "8px 10px",
+  border: "1px solid #d1d5db",
+  borderRadius: "6px",
+  fontSize: "14px",
+  outline: "none",
+  boxSizing: "border-box",
 };
 
 const primaryBtn = {
-  padding: "9px 20px", background: "#2563eb", color: "#fff",
-  border: "none", borderRadius: "6px", fontWeight: "600",
-  fontSize: "14px", cursor: "pointer",
+  padding: "9px 20px",
+  background: "#2563eb",
+  color: "#fff",
+  border: "none",
+  borderRadius: "6px",
+  fontWeight: "600",
+  fontSize: "14px",
+  cursor: "pointer",
 };
 
 const ghostBtn = {
-  padding: "9px 20px", background: "#fff", color: "#374151",
-  border: "1px solid #d1d5db", borderRadius: "6px", fontWeight: "600",
-  fontSize: "14px", cursor: "pointer",
+  padding: "9px 20px",
+  background: "#fff",
+  color: "#374151",
+  border: "1px solid #d1d5db",
+  borderRadius: "6px",
+  fontWeight: "600",
+  fontSize: "14px",
+  cursor: "pointer",
 };

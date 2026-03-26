@@ -1,12 +1,11 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
+  applyMilestoneRenewal,
   createRenewal,
   getAllQualifications,
+  previewMilestoneRenewal,
 } from "../api/qualificationApi";
 import { getDaysLeft } from "../utils/helpers";
-import {
-  calculateRenewedExpiry,
-} from "../utils/renewalEngine";
 import RenewalHistory from "../components/RenewalHistory";
 import ManualRenewalModal from "../components/ManualRenewalModal";
 import MilestonePanel from "../components/MilestonePanel";
@@ -28,7 +27,9 @@ function flattenRenewalHistory(qualifications) {
     .flatMap((qualification) =>
       (qualification.qualification_renewals || []).map((renewal) => ({
         ...renewal,
-        trigger: renewal.notes?.startsWith("Auto:") ? renewal.notes.replace("Auto:", "").trim() : "Manual",
+        trigger: renewal.notes?.startsWith("Auto:")
+          ? renewal.notes.replace("Auto:", "").trim()
+          : "Manual",
         qualName: qualification.qualification_types?.name || "-",
         traineeQualificationId: qualification.id,
       }))
@@ -50,6 +51,7 @@ export default function AutomationPage() {
   const [renewalError, setRenewalError] = useState("");
   const [isSubmittingRenewal, setIsSubmittingRenewal] = useState(false);
   const [isApplyingMilestone, setIsApplyingMilestone] = useState(false);
+  const [milestoneError, setMilestoneError] = useState("");
 
   useEffect(() => {
     loadQualifications();
@@ -102,28 +104,26 @@ export default function AutomationPage() {
     }
   }
 
-  async function handleMilestoneApply(_traineeId, milestoneType, results) {
-    setIsApplyingMilestone(true);
-    setError("");
+  async function handleMilestonePreview(payload) {
+    setMilestoneError("");
 
     try {
-      for (const result of results) {
-        const newExpiryDate = calculateRenewedExpiry(
-          result.qual.expiryDate,
-          result.qual.validityDays || 365
-        );
+      return await previewMilestoneRenewal(payload);
+    } catch (requestError) {
+      setMilestoneError(requestError.message);
+      return [];
+    }
+  }
 
-        await createRenewal({
-          traineeQualificationId: result.qual.id,
-          renewedOn: new Date().toISOString().split("T")[0],
-          newExpiryDate,
-          notes: `Auto: ${milestoneType}`,
-        });
-      }
+  async function handleMilestoneApply(traineeId, milestoneType) {
+    setIsApplyingMilestone(true);
+    setMilestoneError("");
 
+    try {
+      await applyMilestoneRenewal({ traineeId, milestoneType });
       await loadQualifications();
     } catch (requestError) {
-      setError(requestError.message);
+      setMilestoneError(requestError.message);
     } finally {
       setIsApplyingMilestone(false);
     }
@@ -137,7 +137,7 @@ export default function AutomationPage() {
             Renewal Automation Engine
           </h1>
           <p style={{ margin: 0, fontSize: "14px", color: "#6b7280" }}>
-            Auto-renewal logic, expiry tracking, milestone triggers and renewal history
+            Backend-driven renewals, milestone triggers, and renewal history
           </p>
         </div>
 
@@ -298,19 +298,17 @@ export default function AutomationPage() {
                               <StatusChip status={qualification.status} />
                             </td>
                             <td style={{ padding: "12px 16px" }}>
-                              <EligibilityBadge
-                                qual={qualification}
-                                renewalHistory={renewalHistory}
-                              />
+                              <EligibilityBadge qual={qualification} />
                             </td>
                             <td style={{ padding: "12px 16px" }}>
-                              <div style={{ display: "flex", gap: "8px" }}>
+                              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                                 <button
                                   onClick={() => {
                                     setRenewalError("");
                                     setRenewTarget(qualification);
                                   }}
                                   style={actionBtn("#2563eb")}
+                                  disabled={isSubmittingRenewal || isApplyingMilestone}
                                 >
                                   Renew
                                 </button>
@@ -354,16 +352,14 @@ export default function AutomationPage() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
                 <MilestonePanel
                   allQuals={enriched}
-                  renewalHistory={renewalHistory}
+                  onPreview={handleMilestonePreview}
                   onApply={handleMilestoneApply}
                   isApplying={isApplyingMilestone}
+                  error={milestoneError}
                 />
 
                 <div>
-                  <RenewalHistory
-                    history={renewalHistory}
-                    qualName="All Qualifications"
-                  />
+                  <RenewalHistory history={renewalHistory} qualName="All Qualifications" />
                 </div>
               </div>
             )}
@@ -376,7 +372,10 @@ export default function AutomationPage() {
         qualName={renewTarget?.qualTypeName}
         traineeName={renewTarget?.traineeName}
         onClose={() => {
-          if (isSubmittingRenewal) return;
+          if (isSubmittingRenewal) {
+            return;
+          }
+
           setRenewTarget(null);
           setRenewalError("");
         }}
