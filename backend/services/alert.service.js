@@ -1,12 +1,6 @@
 const { randomUUID } = require("crypto");
 const prisma = require("../prisma/client");
 
-const ALERT_DAY_MAP = {
-  30: "DAYS_30",
-  60: "DAYS_60",
-  90: "DAYS_90",
-};
-
 const ALERT_SEVERITY = {
   DAYS_30: "urgent",
   DAYS_60: "expiring_soon",
@@ -23,6 +17,26 @@ const getDaysLeft = (expiryDate) => {
   const today = normalizeDateOnly(new Date());
   const normalizedExpiryDate = normalizeDateOnly(expiryDate);
   return Math.floor((normalizedExpiryDate.getTime() - today.getTime()) / 86400000);
+};
+
+const getAlertType = (daysLeft) => {
+  if (daysLeft < 0) {
+    return null;
+  }
+
+  if (daysLeft <= 30) {
+    return "DAYS_30";
+  }
+
+  if (daysLeft <= 60) {
+    return "DAYS_60";
+  }
+
+  if (daysLeft <= 90) {
+    return "DAYS_90";
+  }
+
+  return null;
 };
 
 const generateAlerts = async () => {
@@ -43,7 +57,7 @@ const generateAlerts = async () => {
 
   for (const qualification of qualifications) {
     const daysLeft = getDaysLeft(qualification.expiryDate);
-    const alertType = ALERT_DAY_MAP[daysLeft];
+    const alertType = getAlertType(daysLeft);
     const latestRenewal = qualification.qualification_renewals[0];
     const cycleStartDate = latestRenewal
       ? latestRenewal.renewedOn

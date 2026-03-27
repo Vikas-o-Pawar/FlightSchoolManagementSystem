@@ -1,6 +1,14 @@
+function normalizeDateOnly(value) {
+  const parsedDate = new Date(value);
+  parsedDate.setHours(0, 0, 0, 0);
+  return parsedDate;
+}
+
 // Returns how many days until expiry (negative = already expired)
 export function getDaysLeft(expiryDate) {
-  return Math.floor((new Date(expiryDate) - new Date()) / 86400000);
+  const today = normalizeDateOnly(new Date());
+  const normalizedExpiryDate = normalizeDateOnly(expiryDate);
+  return Math.floor((normalizedExpiryDate - today) / 86400000);
 }
 
 // Returns today as YYYY-MM-DD string
