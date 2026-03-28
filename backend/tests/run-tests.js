@@ -551,6 +551,81 @@ async function testAlertsOnlyShowCurrentThresholdForCycle() {
   assert.equal(alerts[0].alertType, "DAYS_30");
 }
 
+async function testRenewalClearsEarlierSameDayAlerts() {
+  const prismaModulePath = path.resolve(__dirname, "../prisma/client.js");
+  const alertServiceModulePath = path.resolve(
+    __dirname,
+    "../services/alert.service.js"
+  );
+
+  clearModule(prismaModulePath);
+  clearModule(alertServiceModulePath);
+
+  const qualification = {
+    id: "qual-cpl",
+    traineeId: "trainee-1",
+    qualificationTypeId: "type-cpl",
+    expiryDate: new Date("2027-03-28T00:00:00.000Z"),
+    createdAt: new Date("2025-01-01T00:00:00.000Z"),
+    trainees: {
+      id: "trainee-1",
+      name: "Arjun Mehta",
+      traineeId: "TR002",
+    },
+    qualification_types: {
+      id: "type-cpl",
+      name: "CPL",
+    },
+    qualification_renewals: [
+      {
+        id: "renewal-1",
+        renewedOn: new Date("2026-03-28T00:00:00.000Z"),
+        createdAt: new Date("2026-03-28T18:37:55.781Z"),
+      },
+    ],
+  };
+
+  const mockPrisma = {
+    trainee_qualifications: {
+      findMany: async () => [],
+    },
+    qualification_alerts: {
+      findMany: async () => [
+        {
+          id: "a-60",
+          traineeQualificationId: "qual-cpl",
+          alertType: "DAYS_60",
+          isSent: false,
+          sentAt: null,
+          createdAt: new Date("2026-03-28T18:09:06.341Z"),
+          trainee_qualifications: qualification,
+        },
+        {
+          id: "a-90",
+          traineeQualificationId: "qual-cpl",
+          alertType: "DAYS_90",
+          isSent: false,
+          sentAt: null,
+          createdAt: new Date("2026-03-28T18:08:56.206Z"),
+          trainee_qualifications: qualification,
+        },
+      ],
+    },
+  };
+
+  require.cache[prismaModulePath] = {
+    id: prismaModulePath,
+    filename: prismaModulePath,
+    loaded: true,
+    exports: mockPrisma,
+  };
+
+  const alertService = require(alertServiceModulePath);
+  const alerts = await alertService.getAlerts();
+
+  assert.equal(alerts.length, 0);
+}
+
 async function run() {
   const tests = [
     ["milestone config is enabled", testMilestoneConfigIsEnabled],
@@ -561,6 +636,7 @@ async function run() {
     ["repeated milestone does not double renew", testRepeatedMilestoneDoesNotDoubleRenew],
     ["manual renewal still works", testManualRenewalStillWorks],
     ["alerts show only current threshold per cycle", testAlertsOnlyShowCurrentThresholdForCycle],
+    ["renewal clears earlier same-day alerts", testRenewalClearsEarlierSameDayAlerts],
   ];
 
   for (const [name, fn] of tests) {
