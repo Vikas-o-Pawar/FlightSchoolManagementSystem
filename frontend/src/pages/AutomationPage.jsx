@@ -3,6 +3,7 @@ import {
   applyMilestoneRenewal,
   createRenewal,
   getAllQualifications,
+  getMilestoneAutomationConfig,
   previewMilestoneRenewal,
 } from "../api/qualificationApi";
 import { getDaysLeft } from "../utils/helpers";
@@ -27,9 +28,11 @@ function flattenRenewalHistory(qualifications) {
     .flatMap((qualification) =>
       (qualification.qualification_renewals || []).map((renewal) => ({
         ...renewal,
-        trigger: renewal.notes?.startsWith("Auto:")
-          ? renewal.notes.replace("Auto:", "").trim()
-          : "Manual",
+        trigger: renewal.notes?.startsWith("Milestone:")
+          ? "Milestone"
+          : renewal.notes?.startsWith("Auto:")
+            ? renewal.notes.replace("Auto:", "").trim()
+            : "Manual",
         qualName: qualification.qualification_types?.name || "-",
         traineeQualificationId: qualification.id,
       }))
@@ -52,9 +55,16 @@ export default function AutomationPage() {
   const [isSubmittingRenewal, setIsSubmittingRenewal] = useState(false);
   const [isApplyingMilestone, setIsApplyingMilestone] = useState(false);
   const [milestoneError, setMilestoneError] = useState("");
+  const [milestoneConfig, setMilestoneConfig] = useState({
+    enabled: false,
+    message: "Loading milestone automation configuration...",
+    missingRequirements: [],
+    rules: [],
+  });
 
   useEffect(() => {
     loadQualifications();
+    loadMilestoneConfig();
   }, []);
 
   async function loadQualifications() {
@@ -69,6 +79,20 @@ export default function AutomationPage() {
       setError(requestError.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadMilestoneConfig() {
+    try {
+      const config = await getMilestoneAutomationConfig();
+      setMilestoneConfig(config);
+    } catch (requestError) {
+      setMilestoneConfig({
+        enabled: false,
+        message: requestError.message,
+        missingRequirements: [],
+        rules: [],
+      });
     }
   }
 
@@ -352,6 +376,7 @@ export default function AutomationPage() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
                 <MilestonePanel
                   allQuals={enriched}
+                  config={milestoneConfig}
                   onPreview={handleMilestonePreview}
                   onApply={handleMilestoneApply}
                   isApplying={isApplyingMilestone}

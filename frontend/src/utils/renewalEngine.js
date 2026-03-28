@@ -1,16 +1,6 @@
-export const MILESTONE_RULES = {
-  FLIGHT_HOURS: ["atpl theory", "ir rating", "type rating a320"],
-  COURSE_COMPLETION: ["atpl theory", "crm certificate", "medical class 1"],
-  SIMULATOR_SESSION: ["ir rating", "type rating a320"],
-  ANNUAL_CHECK: ["medical class 1", "crm certificate"],
-};
+export const MILESTONE_RULES = {};
 
-export const MILESTONE_LABELS = {
-  FLIGHT_HOURS: "Flight Hours",
-  COURSE_COMPLETION: "Course Completion",
-  SIMULATOR_SESSION: "Simulator Session",
-  ANNUAL_CHECK: "Annual Check",
-};
+export const MILESTONE_LABELS = {};
 
 export function calculateExpiry(issuedDate, validityDays) {
   const date = new Date(issuedDate);

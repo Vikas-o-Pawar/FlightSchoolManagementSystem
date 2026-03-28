@@ -48,7 +48,7 @@ export default function RenewalHistory({ history = [], qualName }) {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "#f9fafb" }}>
-              {["#", "Renewed On", "New Expiry Date", "Trigger", "Notes"].map((heading) => (
+              {["#", "Renewed On", "New Expiry Date", "Trigger"].map((heading) => (
                 <th
                   key={heading}
                   style={{
@@ -106,9 +106,6 @@ export default function RenewalHistory({ history = [], qualName }) {
                   ) : (
                     <span style={{ fontSize: "12px", color: "#9ca3af" }}>Manual</span>
                   )}
-                </td>
-                <td style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280" }}>
-                  {record.notes || "-"}
                 </td>
               </tr>
             ))}
