@@ -189,6 +189,10 @@ export async function applyMilestoneRenewal(payload) {
   return Array.isArray(data) ? data.map(normalizeQualification) : [];
 }
 
+export async function getMilestoneAutomationConfig() {
+  return request(`${AUTOMATION_PATH}/milestone-renewal/config`);
+}
+
 export async function getAlerts() {
   const data = await request(ALERTS_PATH);
   return Array.isArray(data) ? data.map(normalizeAlert) : [];

@@ -7,6 +7,12 @@ const ALERT_SEVERITY = {
   DAYS_90: "expiring_soon",
 };
 
+const ALERT_PRIORITY = {
+  DAYS_30: 3,
+  DAYS_60: 2,
+  DAYS_90: 1,
+};
+
 const normalizeDateOnly = (value) => {
   const date = new Date(value);
   date.setUTCHours(0, 0, 0, 0);
@@ -39,6 +45,59 @@ const getAlertType = (daysLeft) => {
   return null;
 };
 
+const getCycleStartDate = (qualification) => {
+  const latestRenewal = qualification.qualification_renewals?.[0] || null;
+  return latestRenewal ? latestRenewal.renewedOn : qualification.createdAt;
+};
+
+const isAlertInCurrentCycle = (alert, qualification) =>
+  new Date(alert.createdAt).getTime() >=
+  new Date(getCycleStartDate(qualification)).getTime();
+
+const mapAlertRecord = (alert) => ({
+  id: alert.id,
+  alertType: alert.alertType,
+  expiry: alert.trainee_qualifications.expiryDate,
+  traineeQualificationId: alert.traineeQualificationId,
+  trainee: {
+    id: alert.trainee_qualifications.trainees?.id || null,
+    name: alert.trainee_qualifications.trainees?.name || "-",
+    code: alert.trainee_qualifications.trainees?.traineeId || "-",
+  },
+  qualification: {
+    id: alert.trainee_qualifications.qualification_types?.id || null,
+    name: alert.trainee_qualifications.qualification_types?.name || "-",
+  },
+  severity: ALERT_SEVERITY[alert.alertType] || "expiring_soon",
+  isSent: alert.isSent,
+  sentAt: alert.sentAt,
+  createdAt: alert.createdAt,
+});
+
+const selectCurrentCycleAlert = (alerts) => {
+  if (!alerts.length) {
+    return null;
+  }
+
+  return alerts.reduce((best, current) => {
+    if (!best) {
+      return current;
+    }
+
+    const currentPriority = ALERT_PRIORITY[current.alertType] || 0;
+    const bestPriority = ALERT_PRIORITY[best.alertType] || 0;
+
+    if (currentPriority !== bestPriority) {
+      return currentPriority > bestPriority ? current : best;
+    }
+
+    return new Date(current.createdAt).getTime() >
+      new Date(best.createdAt).getTime()
+      ? current
+      : best;
+  }, null);
+};
+
 const generateAlerts = async () => {
   const qualifications = await prisma.trainee_qualifications.findMany({
     include: {
@@ -58,10 +117,7 @@ const generateAlerts = async () => {
   for (const qualification of qualifications) {
     const daysLeft = getDaysLeft(qualification.expiryDate);
     const alertType = getAlertType(daysLeft);
-    const latestRenewal = qualification.qualification_renewals[0];
-    const cycleStartDate = latestRenewal
-      ? latestRenewal.renewedOn
-      : qualification.createdAt;
+    const cycleStartDate = getCycleStartDate(qualification);
 
     if (!alertType) {
       continue;
@@ -121,40 +177,29 @@ const getAlerts = async () => {
     },
   });
 
-  return alerts
-    .filter((alert) => {
-      const latestRenewal =
-        alert.trainee_qualifications.qualification_renewals?.[0] || null;
-      const cycleStartDate = latestRenewal
-        ? latestRenewal.renewedOn
-        : alert.trainee_qualifications.createdAt;
+  return Array.from(
+    alerts.reduce((grouped, alert) => {
+      const qualification = alert.trainee_qualifications;
 
-      return (
-        new Date(alert.createdAt).getTime() >= new Date(cycleStartDate).getTime()
-      );
-    })
-    .map((alert) => ({
-      id: alert.id,
-      alertType: alert.alertType,
-      expiry: alert.trainee_qualifications.expiryDate,
-      traineeQualificationId: alert.traineeQualificationId,
-      trainee: {
-        id: alert.trainee_qualifications.trainees?.id || null,
-        name: alert.trainee_qualifications.trainees?.name || "-",
-        code: alert.trainee_qualifications.trainees?.traineeId || "-",
-      },
-      qualification: {
-        id: alert.trainee_qualifications.qualification_types?.id || null,
-        name: alert.trainee_qualifications.qualification_types?.name || "-",
-      },
-      severity: ALERT_SEVERITY[alert.alertType] || "expiring_soon",
-      isSent: alert.isSent,
-      sentAt: alert.sentAt,
-      createdAt: alert.createdAt,
-    }));
+      if (!isAlertInCurrentCycle(alert, qualification)) {
+        return grouped;
+      }
+
+      const key = alert.traineeQualificationId;
+      const existing = grouped.get(key) || [];
+      existing.push(alert);
+      grouped.set(key, existing);
+      return grouped;
+    }, new Map()).values()
+  )
+    .map((group) => selectCurrentCycleAlert(group))
+    .filter(Boolean)
+    .map(mapAlertRecord);
 };
 
 module.exports = {
   generateAlerts,
   getAlerts,
+  getAlertType,
+  selectCurrentCycleAlert,
 };

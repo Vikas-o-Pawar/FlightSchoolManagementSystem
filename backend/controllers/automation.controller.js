@@ -26,7 +26,17 @@ const applyMilestoneRenewal = async (req, res) => {
   }
 };
 
+const getMilestoneAutomationConfig = async (_req, res) => {
+  try {
+    const config = automationService.getMilestoneAutomationConfig();
+    return res.status(200).json(config);
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
 module.exports = {
+  getMilestoneAutomationConfig,
   previewMilestoneRenewal,
   applyMilestoneRenewal,
 };

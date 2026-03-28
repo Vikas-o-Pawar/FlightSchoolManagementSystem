@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { MILESTONE_LABELS, MILESTONE_RULES } from "../utils/renewalEngine";
 
 export default function MilestonePanel({
   allQuals,
+  config,
   onPreview,
   onApply,
   isApplying = false,
@@ -49,6 +49,9 @@ export default function MilestonePanel({
 
   const willRenew = preview?.filter((result) => result.eligible) || [];
   const skipped = preview?.filter((result) => !result.eligible) || [];
+  const milestoneOptions = config?.rules || [];
+  const isEnabled = Boolean(config?.enabled);
+  const selectedRule = milestoneOptions.find((rule) => rule.type === milestoneType);
 
   return (
     <div
@@ -75,6 +78,30 @@ export default function MilestonePanel({
       </div>
 
       <div style={{ padding: "18px", borderBottom: "1px solid #e5e7eb" }}>
+        {!isEnabled ? (
+          <div
+            style={{
+              background: "#fffbeb",
+              border: "1px solid #fde68a",
+              borderRadius: "6px",
+              padding: "12px 14px",
+              marginBottom: "14px",
+            }}
+          >
+            <p style={{ margin: 0, fontSize: "13px", color: "#92400e", fontWeight: "600" }}>
+              {config?.message || "Milestone automation is currently unavailable."}
+            </p>
+            {Array.isArray(config?.missingRequirements) &&
+            config.missingRequirements.length > 0 ? (
+              <ul style={{ margin: "8px 0 0 18px", padding: 0, color: "#92400e", fontSize: "12px" }}>
+                {config.missingRequirements.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+
         <div
           style={{
             display: "grid",
@@ -92,7 +119,7 @@ export default function MilestonePanel({
                 setPreview(null);
               }}
               style={selectStyle}
-              disabled={isApplying}
+              disabled={isApplying || !isEnabled}
             >
               <option value="">Choose trainee...</option>
               {trainees.map((trainee) => (
@@ -112,19 +139,19 @@ export default function MilestonePanel({
                 setPreview(null);
               }}
               style={selectStyle}
-              disabled={isApplying}
+              disabled={isApplying || !isEnabled}
             >
               <option value="">Choose milestone...</option>
-              {Object.keys(MILESTONE_LABELS).map((key) => (
-                <option key={key} value={key}>
-                  {MILESTONE_LABELS[key]}
+              {milestoneOptions.map((rule) => (
+                <option key={rule.type} value={rule.type}>
+                  {rule.label}
                 </option>
               ))}
             </select>
           </div>
         </div>
 
-        {milestoneType ? (
+        {milestoneType && isEnabled ? (
           <div
             style={{
               background: "#eff6ff",
@@ -136,7 +163,7 @@ export default function MilestonePanel({
           >
             <p style={{ margin: 0, fontSize: "12px", color: "#1d4ed8" }}>
               <strong>This milestone can renew:</strong>{" "}
-              {MILESTONE_RULES[milestoneType]?.join(", ") || "none"}
+              {selectedRule?.qualificationTypes?.join(", ") || "none"}
             </p>
           </div>
         ) : null}
@@ -144,7 +171,7 @@ export default function MilestonePanel({
         <button
           onClick={handlePreview}
           style={primaryBtn}
-          disabled={isApplying || !traineeId || !milestoneType}
+          disabled={isApplying || !isEnabled || !traineeId || !milestoneType}
         >
           Preview Auto-Renewals
         </button>
