@@ -47,7 +47,7 @@ const getAlertType = (daysLeft) => {
 
 const getCycleStartDate = (qualification) => {
   const latestRenewal = qualification.qualification_renewals?.[0] || null;
-  return latestRenewal ? latestRenewal.renewedOn : qualification.createdAt;
+  return latestRenewal ? latestRenewal.createdAt : qualification.createdAt;
 };
 
 const isAlertInCurrentCycle = (alert, qualification) =>
@@ -106,7 +106,7 @@ const generateAlerts = async () => {
       qualification_alerts: true,
       qualification_renewals: {
         orderBy: {
-          renewedOn: "desc",
+          createdAt: "desc",
         },
       },
     },
@@ -166,7 +166,7 @@ const getAlerts = async () => {
           qualification_types: true,
           qualification_renewals: {
             orderBy: {
-              renewedOn: "desc",
+              createdAt: "desc",
             },
           },
         },
